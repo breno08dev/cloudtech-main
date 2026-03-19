@@ -205,12 +205,14 @@ export type Database = {
           data_finalizacao: string | null
           data_previsao: string | null
           diagnostico: string | null
+          garantia_servico: string | null
           id: string
           imei: string | null
           marca_aparelho: string | null
           modelo_aparelho: string | null
           numero_os: string
           observacoes: string | null
+          peca_original: boolean | null
           problema_relatado: string | null
           senha_aparelho: string | null
           status: string
@@ -230,12 +232,14 @@ export type Database = {
           data_finalizacao?: string | null
           data_previsao?: string | null
           diagnostico?: string | null
+          garantia_servico?: string | null
           id?: string
           imei?: string | null
           marca_aparelho?: string | null
           modelo_aparelho?: string | null
           numero_os: string
           observacoes?: string | null
+          peca_original?: boolean | null
           problema_relatado?: string | null
           senha_aparelho?: string | null
           status?: string
@@ -255,12 +259,14 @@ export type Database = {
           data_finalizacao?: string | null
           data_previsao?: string | null
           diagnostico?: string | null
+          garantia_servico?: string | null
           id?: string
           imei?: string | null
           marca_aparelho?: string | null
           modelo_aparelho?: string | null
           numero_os?: string
           observacoes?: string | null
+          peca_original?: boolean | null
           problema_relatado?: string | null
           senha_aparelho?: string | null
           status?: string
