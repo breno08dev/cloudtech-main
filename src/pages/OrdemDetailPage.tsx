@@ -6,14 +6,32 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { OS_STATUS_MAP } from "@/lib/constants";
 import { toast } from "sonner";
-import { Printer, Plus, Trash2, Loader2, Save, FileText, ShieldCheck } from "lucide-react";
+import { 
+  Printer, 
+  Plus, 
+  Trash2, 
+  Loader2, 
+  Save, 
+  FileText, 
+  ShieldCheck,
+  UserCircle,
+  Smartphone,
+  Wrench,
+  Package,
+  ClipboardList,
+  CheckCircle2,
+  Banknote,
+  CreditCard,
+  QrCode
+} from "lucide-react";
 
 export default function OrdemDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -24,6 +42,10 @@ export default function OrdemDetailPage() {
   const [newServico, setNewServico] = useState({ descricao: "", valor: 0 });
   const [editForm, setEditForm] = useState<any>({});
   const [printMode, setPrintMode] = useState<"os" | "garantia">("os");
+
+  // Estados do Modal de Pagamento
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [paymentData, setPaymentData] = useState({ metodo: "pix", desconto: 0 });
 
   // 1. Fetch das Configurações da Empresa
   const { data: config } = useQuery({
@@ -63,7 +85,6 @@ export default function OrdemDetailPage() {
         diagnostico: data.ordem.diagnostico || "",
         observacoes: data.ordem.observacoes || "",
         status: data.ordem.status || "recebido",
-        // Usa a garantia da OS, se não existir, tenta puxar do painel de Configurações, se não, usa 90 dias
         garantia_servico: data.ordem.garantia_servico || config?.garantia_padrao || "90 dias",
         peca_original: data.ordem.peca_original !== undefined ? data.ordem.peca_original : false,
       });
@@ -78,10 +99,13 @@ export default function OrdemDetailPage() {
     await supabase.from("ordens_servico").update({ valor_pecas: valorPecas, valor_servico: valorServico, valor_total: valorPecas + valorServico }).eq("id", osId);
   };
 
-  const saveOsMutation = useMutation({
-    mutationFn: async () => {
-      const updates = { ...editForm };
-      if (editForm.status === "pronto" || editForm.status === "entregue") updates.data_finalizacao = new Date().toISOString();
+  // Ajustado para aceitar overrides (para quando confirmamos o modal de pagamento)
+ const saveOsMutation = useMutation({
+    mutationFn: async (overrides?: any) => {
+      const updates = { ...editForm, ...overrides };
+      if (updates.status === "pronto" || updates.status === "entregue") {
+        updates.data_finalizacao = new Date().toISOString();
+      }
       const { error } = await supabase.from("ordens_servico").update(updates).eq("id", id!);
       if (error) throw error;
     },
@@ -89,9 +113,12 @@ export default function OrdemDetailPage() {
       toast.success("Ordem de Serviço guardada com sucesso!");
       queryClient.invalidateQueries({ queryKey: ["ordem_detail", id] });
       queryClient.invalidateQueries({ queryKey: ["ordens_servico"] });
+      
+      // NOVA LINHA: Redireciona o utilizador de volta para a lista de OS
+      navigate("/ordens"); 
     },
   });
-
+  
   const addPecaMutation = useMutation({
     mutationFn: async () => {
       if (!newPeca.produto_id) throw new Error("Selecione uma peça");
@@ -135,24 +162,47 @@ export default function OrdemDetailPage() {
 
   const handlePrint = (mode: "os" | "garantia") => {
     setPrintMode(mode);
-    setTimeout(() => {
-      window.print();
-    }, 150);
+    setTimeout(() => window.print(), 150);
   };
 
-  if (isLoading) return <div className="flex h-[80vh] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
-  if (isError || !data?.ordem) return <div className="p-8 text-center text-red-500">Erro ao carregar a OS.</div>;
+  // Função para lidar com a seleção de status
+  const handleStatusChange = (newStatus: string) => {
+    if (newStatus === "entregue") {
+      setPaymentData({ metodo: "pix", desconto: 0 }); // Reseta dados ao abrir
+      setIsPaymentModalOpen(true);
+    } else {
+      setEditForm({ ...editForm, status: newStatus });
+    }
+  };
+
+  // Função para confirmar o pagamento e fechar a OS
+  const handleConfirmPayment = () => {
+    const overrides = {
+      status: "entregue",
+      forma_pagamento: paymentData.metodo,
+      desconto: paymentData.desconto,
+      // Se houver desconto, subtraímos do valor_total original que está no banco
+      valor_total: data.ordem.valor_total - paymentData.desconto
+    };
+    
+    setEditForm({ ...editForm, ...overrides });
+    setIsPaymentModalOpen(false);
+    saveOsMutation.mutate(overrides); // Já salva e finaliza!
+  };
+
+  if (isLoading) return <div className="flex h-[80vh] items-center justify-center"><Loader2 className="h-10 w-10 animate-spin text-primary/60" /></div>;
+  if (isError || !data?.ordem) return <div className="p-8 text-center text-destructive font-medium">Erro ao carregar a OS.</div>;
 
   const { ordem, pecas, servicos, produtos } = data;
-
-  // Variáveis seguras para a impressão (Fallback)
   const nomeLoja = config?.nome_empresa || "Nome da Assistência";
   const enderecoLoja = config?.endereco || "Endereço não configurado";
   const telefoneLoja = config?.telefone || "Telefone não configurado";
 
+  const valorTotalSemDesconto = ordem.valor_total || 0;
+  const valorFinalComDesconto = Math.max(0, valorTotalSemDesconto - paymentData.desconto);
+
   return (
     <>
-      {/* CSS DE IMPRESSÃO */}
       <style>
         {`
           @media print {
@@ -164,12 +214,9 @@ export default function OrdemDetailPage() {
         `}
       </style>
 
-      {/* ========================================================= */}
-      {/* 1. MÁSCARA DA ORDEM DE SERVIÇO (OS)                         */}
-      {/* ========================================================= */}
+      {/* OS PRINT (MANTIDO) */}
       {printMode === "os" && (
         <div className="hidden print:flex print:fixed print:inset-0 print:z-[99999] bg-white text-black flex-col print-page text-[11px]">
-          
           <div className="flex justify-between items-start border-b-2 border-black pb-4 mb-5">
             <div>
               <h1 className="text-2xl font-black uppercase tracking-widest leading-none mb-1">{nomeLoja}</h1>
@@ -245,11 +292,11 @@ export default function OrdemDetailPage() {
             <div className="w-64 bg-gray-50 p-3 border border-gray-300 rounded-md text-right">
               <p className="text-[11px] text-gray-600 mb-0.5">Subtotal Serviços: R$ {ordem.valor_servico.toFixed(2)}</p>
               <p className="text-[11px] text-gray-600 mb-1">Subtotal Peças: R$ {ordem.valor_pecas.toFixed(2)}</p>
+              {ordem.desconto > 0 && <p className="text-[11px] text-red-600 mb-1">Desconto: - R$ {Number(ordem.desconto).toFixed(2)}</p>}
               <p className="text-lg font-black mt-1 border-t border-gray-300 pt-1 leading-none">TOTAL: R$ {ordem.valor_total.toFixed(2)}</p>
             </div>
           </div>
 
-          {/* Opcional: Mensagem Padrão que configurou */}
           {config?.mensagem_padrao_os && (
             <div className="mt-4 text-[10px] text-gray-500 text-justify">
               <strong>Atenção:</strong> {config.mensagem_padrao_os}
@@ -268,12 +315,9 @@ export default function OrdemDetailPage() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* 2. MÁSCARA DO TERMO DE GARANTIA                             */}
-      {/* ========================================================= */}
+      {/* GARANTIA PRINT (MANTIDO) */}
       {printMode === "garantia" && (
         <div className="hidden print:flex print:fixed print:inset-0 print:z-[99999] bg-white text-black flex-col print-page text-[12px] leading-relaxed">
-          
           <div className="text-center border-b-2 border-black pb-4 mb-6">
             <h1 className="text-3xl font-black uppercase tracking-widest mb-1">{nomeLoja}</h1>
             <p className="text-[10px] text-gray-600">{enderecoLoja} | Telefones: {telefoneLoja}</p>
@@ -321,192 +365,455 @@ export default function OrdemDetailPage() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* INTERFACE DO SISTEMA                                      */}
-      {/* ========================================================= */}
-      <div className="print:hidden space-y-6 max-w-5xl mx-auto pb-12">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-card p-5 rounded-2xl border shadow-sm">
+      {/* MODAL DE PAGAMENTO (NOVO) */}
+      <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
+        <DialogContent className="sm:max-w-md rounded-3xl p-0 overflow-hidden border-border/40 shadow-2xl">
+          <div className="bg-primary/10 p-6 flex flex-col items-center justify-center border-b border-border/40 relative">
+            <div className="absolute top-4 right-4 bg-background/50 px-3 py-1 rounded-full text-xs font-bold border border-border/60">
+              OS: {ordem.numero_os}
+            </div>
+            <DialogTitle className="text-2xl font-black mt-2">Finalizar Entrega</DialogTitle>
+            <p className="text-sm text-muted-foreground mt-1">Registe o pagamento para fechar a OS.</p>
+          </div>
+          
+          <div className="p-6 space-y-6 bg-background">
+            
+            {/* Escolha do Método */}
+            <div className="space-y-3">
+              <Label className="text-sm font-bold uppercase tracking-wider text-muted-foreground/80">Forma de Pagamento</Label>
+              <RadioGroup 
+                value={paymentData.metodo} 
+                onValueChange={(v) => setPaymentData({...paymentData, metodo: v})} 
+                className="grid grid-cols-2 gap-3"
+              >
+                {[
+                  { id: 'pix', label: 'PIX', icon: QrCode },
+                  { id: 'cartao_credito', label: 'Crédito', icon: CreditCard },
+                  { id: 'cartao_debito', label: 'Débito', icon: CreditCard },
+                  { id: 'dinheiro', label: 'Dinheiro', icon: Banknote },
+                ].map((metodo) => (
+                  <div key={metodo.id} className="relative">
+                    <RadioGroupItem value={metodo.id} id={metodo.id} className="peer sr-only" />
+                    <Label 
+                      htmlFor={metodo.id} 
+                      className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl border-2 border-border/50 bg-card hover:bg-muted/50 peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/5 cursor-pointer transition-all"
+                    >
+                      <metodo.icon className={`h-6 w-6 ${paymentData.metodo === metodo.id ? 'text-primary' : 'text-muted-foreground'}`} />
+                      <span className="font-semibold">{metodo.label}</span>
+                    </Label>
+                  </div>
+                ))}
+              </RadioGroup>
+            </div>
+
+            {/* Desconto */}
+            <div className="space-y-3">
+              <Label className="text-sm font-bold uppercase tracking-wider text-muted-foreground/80">Aplicar Desconto (R$)</Label>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-muted-foreground">R$</span>
+                <Input 
+                  type="number" 
+                  min="0"
+                  step="0.01"
+                  value={paymentData.desconto || ""}
+                  onChange={(e) => setPaymentData({...paymentData, desconto: Number(e.target.value)})}
+                  className="h-12 pl-10 text-lg font-mono rounded-xl bg-card border-border/60 focus-visible:ring-primary"
+                  placeholder="0.00"
+                />
+              </div>
+            </div>
+
+            {/* Resumo Final */}
+            <div className="bg-muted/30 p-4 rounded-2xl border border-border/40 space-y-2">
+              <div className="flex justify-between text-sm text-muted-foreground">
+                <span>Subtotal:</span>
+                <span className="font-mono">R$ {valorTotalSemDesconto.toFixed(2)}</span>
+              </div>
+              {paymentData.desconto > 0 && (
+                <div className="flex justify-between text-sm text-red-500 font-medium">
+                  <span>Desconto:</span>
+                  <span className="font-mono">- R$ {paymentData.desconto.toFixed(2)}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-end pt-2 border-t border-border/60">
+                <span className="font-bold">Total a Pagar:</span>
+                <span className="text-3xl font-black text-primary font-mono tracking-tighter">R$ {valorFinalComDesconto.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="p-4 bg-muted/20 border-t border-border/40 sm:justify-between flex-row">
+            <Button variant="ghost" onClick={() => setIsPaymentModalOpen(false)} className="rounded-xl">Cancelar</Button>
+            <Button onClick={handleConfirmPayment} className="rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold shadow-lg shadow-primary/20 px-6">
+              <CheckCircle2 className="mr-2 h-4 w-4" /> Confirmar Pagamento
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* INTERFACE DO SISTEMA PREMIUM */}
+      <div className="print:hidden space-y-6 max-w-5xl mx-auto pb-12 animate-in fade-in duration-500">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-card/40 border border-border/40 p-5 rounded-3xl backdrop-blur-sm shadow-sm">
           <div>
-            <h1 className="text-2xl font-bold flex items-center gap-3">
-              <FileText className="h-7 w-7 text-primary" />
+            <h1 className="text-2xl font-black tracking-tight text-foreground flex items-center gap-3">
+              <FileText className="h-6 w-6 text-primary" />
               Gestão da OS
-              <span className="font-mono text-primary bg-primary/10 px-3 py-1 rounded-lg text-lg tracking-wider border border-primary/20">{ordem.numero_os}</span>
+              <span className="font-mono text-primary bg-primary/10 px-3 py-1 rounded-xl text-lg tracking-wider border border-primary/20 shadow-inner">
+                {ordem.numero_os}
+              </span>
             </h1>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => handlePrint("os")} className="font-semibold bg-background hover:bg-muted">
+            <Button variant="outline" onClick={() => handlePrint("os")} className="h-11 rounded-xl font-semibold bg-background hover:bg-muted/80 border-border/60 transition-colors">
               <Printer className="h-4 w-4 mr-2" /> Imprimir OS
             </Button>
-            <Button variant="outline" onClick={() => handlePrint("garantia")} className="font-semibold border-amber-500/30 text-amber-600 hover:bg-amber-500/10">
+            <Button variant="outline" onClick={() => handlePrint("garantia")} className="h-11 rounded-xl font-semibold border-amber-500/30 text-amber-600 bg-amber-500/5 hover:bg-amber-500/10 transition-colors">
               <ShieldCheck className="h-4 w-4 mr-2" /> Imprimir Garantia
             </Button>
-            <Button onClick={() => saveOsMutation.mutate()} disabled={saveOsMutation.isPending} className="font-bold shadow-md">
+            <Button onClick={() => saveOsMutation.mutate({})}disabled={saveOsMutation.isPending} className="h-11 rounded-xl font-bold bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 transition-all px-6">
               {saveOsMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
               Salvar Alterações
             </Button>
           </div>
         </div>
 
-        {/* Componentes de Edição (Corpo da Página) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Card className="shadow-sm border-border/50">
-            <CardContent className="p-5">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wider mb-3 block">Dados do Cliente</Label>
-              <div className="space-y-2">
-                <div className="font-semibold text-lg">{ordem.clientes?.nome || "Cliente não vinculado"}</div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <span className="bg-muted px-2 py-0.5 rounded-md text-xs border">{ordem.clientes?.tipo_cliente === "lojista" ? "Lojista" : "Cliente Final"}</span>
+          <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm">
+            <CardContent className="p-6">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2 font-bold">
+                <UserCircle className="h-4 w-4 text-primary" /> Dados do Cliente
+              </Label>
+              <div className="space-y-3">
+                <div className="font-bold text-xl text-foreground/90">{ordem.clientes?.nome || "Cliente não vinculado"}</div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground font-medium">
+                  <span className="bg-muted/50 px-2.5 py-1 rounded-lg text-xs border border-border/60">
+                    {ordem.clientes?.tipo_cliente === "lojista" ? "Lojista" : "Cliente Final"}
+                  </span>
                   <span>{ordem.clientes?.telefone || "Sem telefone cadastrado"}</span>
                 </div>
               </div>
             </CardContent>
           </Card>
           
-          <Card className="shadow-sm border-border/50">
-            <CardContent className="p-5">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wider mb-3 block">Equipamento</Label>
-              <div className="grid grid-cols-2 gap-4">
-                <div><Label className="text-xs text-muted-foreground">Marca/Modelo</Label><p className="font-semibold">{[ordem.marca_aparelho, ordem.modelo_aparelho].join(" ")}</p></div>
-                <div><Label className="text-xs text-muted-foreground">IMEI</Label><p className="font-mono text-sm">{ordem.imei || "—"}</p></div>
-                <div className="col-span-2"><Label className="text-xs text-muted-foreground">Senha de Desbloqueio</Label><p className="font-mono bg-muted/50 px-3 py-1.5 rounded-md inline-block border">{ordem.senha_aparelho || "—"}</p></div>
+          <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm">
+            <CardContent className="p-6">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2 font-bold">
+                <Smartphone className="h-4 w-4 text-indigo-500" /> Equipamento
+              </Label>
+              <div className="grid grid-cols-2 gap-5">
+                <div>
+                  <Label className="text-xs text-muted-foreground/80 font-medium">Marca/Modelo</Label>
+                  <p className="font-bold text-foreground/90 mt-0.5">{[ordem.marca_aparelho, ordem.modelo_aparelho].join(" ")}</p>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground/80 font-medium">IMEI / Série</Label>
+                  <p className="font-mono text-sm font-semibold text-foreground/80 mt-0.5">{ordem.imei || "—"}</p>
+                </div>
+                <div className="col-span-2">
+                  <Label className="text-xs text-muted-foreground/80 font-medium">Senha de Desbloqueio</Label>
+                  <p className="font-mono bg-background px-3 py-1.5 rounded-lg inline-block border border-border/60 font-medium text-sm mt-1">
+                    {ordem.senha_aparelho || "Não informada"}
+                  </p>
+                </div>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        <Card className="shadow-sm border-border/50">
+        <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm">
           <CardContent className="p-6 space-y-6">
             <div className="grid gap-2">
-              <Label className="text-sm font-bold">Problema Relatado pelo Cliente</Label>
+              <Label className="text-sm font-bold flex items-center gap-2 text-foreground/90">
+                <ClipboardList className="h-4 w-4 text-amber-500" /> Problema Relatado pelo Cliente
+              </Label>
               <Textarea 
                 value={editForm.problema_relatado} 
                 onChange={(e) => setEditForm({...editForm, problema_relatado: e.target.value})}
-                className="min-h-[80px] text-base resize-none bg-muted/20"
+                className="min-h-[90px] text-base resize-none rounded-xl bg-card/50 border-border/50 focus-visible:ring-primary transition-all"
               />
             </div>
-            <div className="grid gap-2">
-              <Label className="text-sm font-bold text-primary flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>Diagnóstico Técnico</Label>
+            <div className="grid gap-2 pt-2">
+              <Label className="text-sm font-bold text-primary flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse shadow-[0_0_8px_hsl(var(--primary))]"></div>
+                Diagnóstico Técnico
+              </Label>
               <Textarea 
                 value={editForm.diagnostico} 
                 onChange={(e) => setEditForm({...editForm, diagnostico: e.target.value})}
-                className="min-h-[100px] text-base border-primary/30 focus-visible:ring-primary/20 bg-primary/5"
+                className="min-h-[110px] text-base rounded-xl border-primary/30 focus-visible:ring-primary/50 bg-primary/5 transition-all"
                 placeholder="Descreva o que foi encontrado e o que precisa ser feito..."
               />
             </div>
           </CardContent>
         </Card>
 
-        {/* Seções de Serviços e Peças */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card className="shadow-sm border-border/50 flex flex-col">
+          <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm flex flex-col overflow-hidden">
+            <CardHeader className="bg-card border-b border-border/40 pb-4 px-5 pt-5">
+              <CardTitle className="text-sm font-bold flex items-center gap-2 text-foreground tracking-wide uppercase">
+                <Wrench className="h-4 w-4 text-primary" /> Mão de Obra / Serviços
+              </CardTitle>
+            </CardHeader>
             <CardContent className="p-0 flex flex-col flex-1">
-              <div className="p-4 bg-muted/30 border-b">
-                <Label className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Mão de Obra / Serviços</Label>
-              </div>
               <div className="flex-1 max-h-[250px] overflow-auto">
                 <Table>
-                  <TableHeader>
-                    <TableRow><TableHead>Descrição</TableHead><TableHead className="text-right">Valor</TableHead><TableHead className="w-12"></TableHead></TableRow>
+                  <TableHeader className="bg-muted/20">
+                    <TableRow className="hover:bg-transparent border-border/30">
+                      <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground/80 font-bold py-3">Descrição</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground/80 font-bold text-right py-3">Valor</TableHead>
+                      <TableHead className="w-12 py-3"></TableHead>
+                    </TableRow>
                   </TableHeader>
                   <TableBody>
+                    {servicos.length === 0 && (
+                      <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-6 text-sm">Nenhum serviço lançado.</TableCell></TableRow>
+                    )}
                     {servicos.map((s: any) => (
-                      <TableRow key={s.id}><TableCell className="font-medium text-sm">{s.descricao}</TableCell><TableCell className="text-right font-mono text-primary font-bold">R$ {s.valor.toFixed(2)}</TableCell><TableCell><Button variant="ghost" size="icon" onClick={() => removePecaMutation.mutate(s)}><Trash2 className="h-4 w-4 text-destructive" /></Button></TableCell></TableRow>
+                      <TableRow key={s.id} className="border-border/20 hover:bg-muted/30 transition-colors">
+                        <TableCell className="font-medium text-sm text-foreground/90">{s.descricao}</TableCell>
+                        <TableCell className="text-right font-mono text-primary font-bold">R$ {s.valor.toFixed(2)}</TableCell>
+                        <TableCell>
+                          <Button variant="ghost" size="icon" onClick={() => removePecaMutation.mutate(s)} className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive transition-colors">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </div>
-              <div className="p-4 bg-background border-t space-y-3">
-                <div className="grid gap-1"><Label className="text-xs">Descrição do Serviço</Label><Input placeholder="Ex: Formatação, Limpeza..." value={newServico.descricao} onChange={(e) => setNewServico({...newServico, descricao: e.target.value})} /></div>
+              <div className="p-5 bg-background border-t border-border/40 space-y-4">
+                <div className="grid gap-1.5">
+                  <Label className="text-xs font-semibold text-muted-foreground">Descrição do Novo Serviço</Label>
+                  <Input 
+                    placeholder="Ex: Formatação, Limpeza Interna..." 
+                    value={newServico.descricao} 
+                    onChange={(e) => setNewServico({...newServico, descricao: e.target.value})} 
+                    className="h-11 rounded-xl bg-card border-border/60 focus-visible:ring-primary transition-all"
+                  />
+                </div>
                 <div className="flex gap-3">
-                  <div className="w-1/2 grid gap-1"><Label className="text-xs">Valor (R$)</Label><Input type="number" value={newServico.valor || ""} onChange={(e) => setNewServico({...newServico, valor: Number(e.target.value)})} /></div>
-                  <Button onClick={() => addServicoMutation.mutate()} disabled={addServicoMutation.isPending || !newServico.descricao} className="w-1/2 self-end"><Plus className="h-4 w-4 mr-2" /> Incluir</Button>
+                  <div className="w-1/2 grid gap-1.5">
+                    <Label className="text-xs font-semibold text-muted-foreground">Valor (R$)</Label>
+                    <Input 
+                      type="number" 
+                      value={newServico.valor || ""} 
+                      onChange={(e) => setNewServico({...newServico, valor: Number(e.target.value)})} 
+                      className="h-11 rounded-xl bg-card border-border/60 focus-visible:ring-primary transition-all font-mono"
+                    />
+                  </div>
+                  <Button 
+                    onClick={() => addServicoMutation.mutate()} 
+                    disabled={addServicoMutation.isPending || !newServico.descricao} 
+                    className="w-1/2 self-end h-11 rounded-xl font-bold hover:bg-primary/90 transition-all shadow-sm"
+                  >
+                    <Plus className="h-4 w-4 mr-2" /> Incluir
+                  </Button>
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="shadow-sm border-border/50 flex flex-col">
+          <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm flex flex-col overflow-hidden">
+             <CardHeader className="bg-card border-b border-border/40 pb-4 px-5 pt-5">
+              <CardTitle className="text-sm font-bold flex items-center gap-2 text-foreground tracking-wide uppercase">
+                <Package className="h-4 w-4 text-emerald-500" /> Peças do Estoque
+              </CardTitle>
+            </CardHeader>
             <CardContent className="p-0 flex flex-col flex-1">
-              <div className="p-4 bg-muted/30 border-b">
-                <Label className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Peças do Estoque</Label>
-              </div>
               <div className="flex-1 max-h-[250px] overflow-auto">
                 <Table>
-                  <TableHeader>
-                    <TableRow><TableHead>Produto</TableHead><TableHead className="text-center">Qtd</TableHead><TableHead className="text-right">Total</TableHead><TableHead className="w-12"></TableHead></TableRow>
+                  <TableHeader className="bg-muted/20">
+                    <TableRow className="hover:bg-transparent border-border/30">
+                      <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground/80 font-bold py-3">Produto</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground/80 font-bold text-center py-3">Qtd</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground/80 font-bold text-right py-3">Total</TableHead>
+                      <TableHead className="w-12 py-3"></TableHead>
+                    </TableRow>
                   </TableHeader>
                   <TableBody>
+                    {pecas.length === 0 && (
+                      <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-6 text-sm">Nenhuma peça adicionada.</TableCell></TableRow>
+                    )}
                     {pecas.map((p: any) => (
-                      <TableRow key={p.id}><TableCell className="font-medium line-clamp-2">{p.produtos?.nome}</TableCell><TableCell className="text-center font-mono bg-muted/20">{p.quantidade}</TableCell><TableCell className="text-right font-mono text-primary font-bold">R$ {p.subtotal.toFixed(2)}</TableCell><TableCell><Button variant="ghost" size="icon" onClick={() => removePecaMutation.mutate(p)}><Trash2 className="h-4 w-4 text-destructive" /></Button></TableCell></TableRow>
+                      <TableRow key={p.id} className="border-border/20 hover:bg-muted/30 transition-colors">
+                        <TableCell className="font-medium text-sm text-foreground/90 line-clamp-2 leading-tight py-2">{p.produtos?.nome}</TableCell>
+                        <TableCell className="text-center">
+                          <span className="font-mono bg-muted px-2 py-0.5 rounded-md text-xs border border-border/40">{p.quantidade}</span>
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-emerald-600 font-bold">R$ {p.subtotal.toFixed(2)}</TableCell>
+                        <TableCell>
+                          <Button variant="ghost" size="icon" onClick={() => removePecaMutation.mutate(p)} className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive transition-colors">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </div>
-              <div className="p-4 bg-background border-t space-y-3">
-                <div className="grid gap-1"><Label className="text-xs">Buscar Peça</Label><Select value={newPeca.produto_id} onValueChange={(v) => setNewPeca({...newPeca, produto_id: v})}><SelectTrigger><SelectValue placeholder="Selecione o produto..." /></SelectTrigger><SelectContent>{produtos.map((p: any) => {
-                    const isLojista = ordem.clientes?.tipo_cliente === "lojista";
-                    const preco = isLojista && p.preco_lojista > 0 ? p.preco_lojista : p.preco_venda;
-                    return (
-                      <SelectItem key={p.id} value={p.id}>{p.nome} - R$ {preco.toFixed(2)} (Est: {p.estoque})</SelectItem>
-                    )
-                  })}</SelectContent></Select></div>
+              <div className="p-5 bg-background border-t border-border/40 space-y-4">
+                <div className="grid gap-1.5">
+                  <Label className="text-xs font-semibold text-muted-foreground">Buscar Peça no Estoque</Label>
+                  <Select value={newPeca.produto_id} onValueChange={(v) => setNewPeca({...newPeca, produto_id: v})}>
+                    <SelectTrigger className="h-11 rounded-xl bg-card border-border/60 focus:ring-primary transition-all text-sm">
+                      <SelectValue placeholder="Selecione o produto..." />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl border-border/50 shadow-lg">
+                      {produtos.map((p: any) => {
+                        const isLojista = ordem.clientes?.tipo_cliente === "lojista";
+                        const preco = isLojista && p.preco_lojista > 0 ? p.preco_lojista : p.preco_venda;
+                        return (
+                          <SelectItem key={p.id} value={p.id} className="font-medium text-sm">
+                            {p.nome} - R$ {preco.toFixed(2)} <span className="text-muted-foreground text-xs ml-1">(Est: {p.estoque})</span>
+                          </SelectItem>
+                        )
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="flex gap-3">
-                  <div className="w-1/3 grid gap-1"><Label className="text-xs">Qtd.</Label><Input type="number" min="1" value={newPeca.quantidade} onChange={(e) => setNewPeca({...newPeca, quantidade: Number(e.target.value)})} /></div>
-                  <Button onClick={() => addPecaMutation.mutate()} disabled={addPecaMutation.isPending || !newPeca.produto_id} className="w-2/3 self-end"><Plus className="h-4 w-4 mr-2" /> Adicionar</Button>
+                  <div className="w-1/3 grid gap-1.5">
+                    <Label className="text-xs font-semibold text-muted-foreground">Qtd.</Label>
+                    <Input 
+                      type="number" 
+                      min="1" 
+                      value={newPeca.quantidade} 
+                      onChange={(e) => setNewPeca({...newPeca, quantidade: Number(e.target.value)})} 
+                      className="h-11 rounded-xl bg-card border-border/60 focus-visible:ring-primary transition-all font-mono text-center"
+                    />
+                  </div>
+                  <Button 
+                    onClick={() => addPecaMutation.mutate()} 
+                    disabled={addPecaMutation.isPending || !newPeca.produto_id} 
+                    className="w-2/3 self-end h-11 rounded-xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm shadow-emerald-600/20 transition-all"
+                  >
+                    <Plus className="h-4 w-4 mr-2" /> Adicionar
+                  </Button>
                 </div>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Resumo Financeiro e Status */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Card className="shadow-sm border-l-4 border-l-amber-500 bg-amber-500/5">
+          <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm">
             <CardContent className="p-6 space-y-6">
               <div className="grid gap-3">
-                <Label className="text-sm font-bold">Garantia do Serviço</Label>
-                <RadioGroup value={editForm.garantia_servico} onValueChange={(v) => setEditForm({...editForm, garantia_servico: v})} className="flex flex-wrap gap-4">
-                  <div className="flex items-center space-x-2 bg-background px-3 py-2 rounded-lg border"><RadioGroupItem value="Sem garantia" id="r1" /><Label htmlFor="r1">Sem garantia</Label></div>
-                  <div className="flex items-center space-x-2 bg-background px-3 py-2 rounded-lg border"><RadioGroupItem value="90 dias" id="r2" /><Label htmlFor="r2">90 dias</Label></div>
-                  <div className="flex items-center space-x-2 bg-background px-3 py-2 rounded-lg border"><RadioGroupItem value={config?.garantia_padrao || "Outro"} id="r3" /><Label htmlFor="r3">{config?.garantia_padrao || "Outro"}</Label></div>
+                <Label className="text-sm font-bold flex items-center gap-2 text-foreground/90"><CheckCircle2 className="h-4 w-4 text-primary" /> Garantia do Serviço</Label>
+                <RadioGroup value={editForm.garantia_servico} onValueChange={(v) => setEditForm({...editForm, garantia_servico: v})} className="flex flex-wrap gap-3">
+                  {Array.from(new Set(["Sem garantia", "90 dias", config?.garantia_padrao].filter(Boolean))).map((opcao, idx) => (
+                    <div key={idx} className="flex items-center space-x-2 bg-background/50 px-4 py-2.5 rounded-xl border border-border/60 hover:bg-muted/50 transition-colors cursor-pointer">
+                      <RadioGroupItem value={opcao as string} id={`garantia-${idx}`} />
+                      <Label htmlFor={`garantia-${idx}`} className="cursor-pointer font-medium text-sm">{opcao}</Label>
+                    </div>
+                  ))}
                 </RadioGroup>
               </div>
-              <div className="grid gap-3">
-                <Label className="text-sm font-bold">Qualidade da Peça</Label>
-                <RadioGroup value={editForm.peca_original ? "sim" : "nao"} onValueChange={(v) => setEditForm({...editForm, peca_original: v === "sim"})} className="flex gap-4">
-                  <div className="flex items-center space-x-2 bg-background px-3 py-2 rounded-lg border"><RadioGroupItem value="sim" id="p1" /><Label htmlFor="p1">Peça Original</Label></div>
-                  <div className="flex items-center space-x-2 bg-background px-3 py-2 rounded-lg border"><RadioGroupItem value="nao" id="p2" /><Label htmlFor="p2">Peça Paralela</Label></div>
+              <div className="grid gap-3 pt-2">
+                <Label className="text-sm font-bold text-foreground/90">Qualidade da Peça Aplicada</Label>
+                <RadioGroup value={editForm.peca_original ? "sim" : "nao"} onValueChange={(v) => setEditForm({...editForm, peca_original: v === "sim"})} className="flex gap-3">
+                  <div className="flex items-center space-x-2 bg-background/50 px-4 py-2.5 rounded-xl border border-border/60 hover:bg-muted/50 transition-colors cursor-pointer">
+                    <RadioGroupItem value="sim" id="p1" />
+                    <Label htmlFor="p1" className="cursor-pointer font-medium text-sm">Peça Original</Label>
+                  </div>
+                  <div className="flex items-center space-x-2 bg-background/50 px-4 py-2.5 rounded-xl border border-border/60 hover:bg-muted/50 transition-colors cursor-pointer">
+                    <RadioGroupItem value="nao" id="p2" />
+                    <Label htmlFor="p2" className="cursor-pointer font-medium text-sm">Peça Paralela / OEM</Label>
+                  </div>
                 </RadioGroup>
               </div>
-              <div className="grid gap-2">
-                <Label className="text-sm font-bold">Observações de Entrega</Label>
-                <Textarea value={editForm.observacoes} onChange={(e) => setEditForm({...editForm, observacoes: e.target.value})} className="bg-background" placeholder="Ex: Entregue sem a capinha original..." />
+              <div className="grid gap-2 pt-2">
+                <Label className="text-sm font-bold text-foreground/90">Observações de Entrega Internas</Label>
+                <Textarea 
+                  value={editForm.observacoes} 
+                  onChange={(e) => setEditForm({...editForm, observacoes: e.target.value})} 
+                  className="bg-background/50 rounded-xl border-border/60 min-h-[80px] resize-none focus-visible:ring-primary transition-all" 
+                  placeholder="Ex: Cliente deixou chip e cartão SD na gaveta..." 
+                />
               </div>
             </CardContent>
           </Card>
 
-          <Card className="shadow-lg border-primary/30 bg-primary/5 flex flex-col justify-between relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 rounded-bl-full -z-0"></div>
-            <CardContent className="p-8 space-y-8 relative z-10">
-              <div className="space-y-4">
-                <div className="flex justify-between text-base"><span className="text-muted-foreground font-medium">Subtotal Serviços</span><span className="font-mono font-bold text-foreground">R$ {ordem.valor_servico.toFixed(2)}</span></div>
-                <div className="flex justify-between text-base"><span className="text-muted-foreground font-medium">Subtotal Peças</span><span className="font-mono font-bold text-foreground">R$ {ordem.valor_pecas.toFixed(2)}</span></div>
-                <div className="border-t-2 border-primary/20 pt-4 flex justify-between items-end">
-                  <span className="font-black uppercase tracking-wider text-sm text-primary">Total da OS</span>
-                  <span className="text-4xl font-black text-primary font-mono tracking-tighter">R$ {ordem.valor_total.toFixed(2)}</span>
+          <Card className="rounded-3xl border-none shadow-xl shadow-primary/5 bg-gradient-to-br from-primary/10 via-background to-background flex flex-col justify-between relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-48 h-48 bg-primary/10 rounded-bl-[100px] -z-0 blur-xl pointer-events-none"></div>
+            
+            <CardContent className="p-8 space-y-8 relative z-10 flex-1 flex flex-col justify-center">
+              <div className="space-y-5">
+                <div className="flex justify-between items-center text-base">
+                  <span className="text-muted-foreground font-semibold">Mão de Obra</span>
+                  <span className="font-mono font-bold text-foreground/90 bg-background px-3 py-1 rounded-lg border border-border/40 shadow-sm">
+                    R$ {ordem.valor_servico.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-base">
+                  <span className="text-muted-foreground font-semibold">Peças / Material</span>
+                  <span className="font-mono font-bold text-foreground/90 bg-background px-3 py-1 rounded-lg border border-border/40 shadow-sm">
+                    R$ {ordem.valor_pecas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                
+                {/* Linha de Desconto visível apenas se houver */}
+                {ordem.desconto > 0 && (
+                  <div className="flex justify-between items-center text-base text-red-500 font-medium">
+                    <span>Desconto Aplicado</span>
+                    <span className="font-mono font-bold bg-background px-3 py-1 rounded-lg border border-red-200 shadow-sm">
+                      - R$ {Number(ordem.desconto).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                )}
+
+                <div className="border-t-2 border-primary/20 pt-6 flex justify-between items-end">
+                  <span className="font-black uppercase tracking-widest text-sm text-primary mb-1">Total da OS</span>
+                  <span className="text-5xl font-black text-primary font-mono tracking-tighter drop-shadow-sm">
+                    R$ {ordem.valor_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
                 </div>
               </div>
 
-              <div className="grid gap-2 pt-4 bg-background p-4 rounded-xl border shadow-sm">
-                <Label className="text-xs font-bold uppercase text-center block mb-1 text-muted-foreground tracking-widest">Atualizar Status</Label>
-                <Select value={editForm.status} onValueChange={(v) => setEditForm({...editForm, status: v})}>
-                  <SelectTrigger className="h-14 text-lg font-bold bg-transparent border-0 shadow-none justify-center focus:ring-0">
-                    <SelectValue />
+           <div className="grid gap-3 pt-6 mt-auto">
+                <Label className="text-xs font-bold uppercase block text-muted-foreground/80 tracking-widest ml-1">Atualizar Status da OS</Label>
+                
+                <Select value={editForm.status} onValueChange={handleStatusChange}>
+                  
+                  <SelectTrigger className="h-16 text-lg font-bold bg-background/80 backdrop-blur-md border border-border/60 shadow-sm rounded-2xl px-6 focus:ring-primary transition-all">
+                    <SelectValue placeholder="Selecione o status" />
                   </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(OS_STATUS_MAP).map(([k, v]) => (
-                      <SelectItem key={k} value={k} className="text-base py-3 cursor-pointer justify-center text-center font-medium">{v.label}</SelectItem>
-                    ))}
+                  
+                  <SelectContent className="rounded-2xl border-border/50 shadow-xl">
+                    {Object.entries(OS_STATUS_MAP).map(([k, v]) => {
+                      
+                      // Sistema à prova de falhas: ignora maiúsculas/minúsculas e procura só a palavra principal
+                      const chave = String(k).toLowerCase();
+                      let corHex = '#3b82f6'; // Azul Padrão (Fallback)
+
+                      if (chave.includes('recebido')) corHex = '#94a3b8'; // Cinza 
+                      else if (chave.includes('analise') || chave.includes('análise')) corHex = '#f97316'; // Laranja
+                      else if (chave.includes('aguardando')) corHex = '#eab308'; // Amarelo
+                      else if (chave.includes('manutencao') || chave.includes('manutenção')) corHex = '#a855f7'; // Roxo
+                      else if (chave.includes('pronto')) corHex = '#3b82f6'; // Azul
+                      else if (chave.includes('entregue')) corHex = '#22c55e'; // Verde
+                      else if (chave.includes('cancelad')) corHex = '#ef4444'; // Vermelho
+
+                      return (
+                        <SelectItem key={k} value={k} className="text-base py-3 cursor-pointer font-medium transition-colors hover:bg-muted/50">
+                          <div className="flex items-center gap-3">
+                            {/* Forçamos o tamanho e a cor via CSS inline puro para nunca falhar */}
+                            <div 
+                              style={{ 
+                                backgroundColor: corHex, 
+                                width: '12px', 
+                                height: '12px', 
+                                minWidth: '12px', 
+                                borderRadius: '50%' 
+                              }} 
+                              className="shadow-sm border border-black/10"
+                            />
+                            <span>{v.label}</span>
+                          </div>
+                        </SelectItem>
+                      )
+                    })}
                   </SelectContent>
                 </Select>
               </div>

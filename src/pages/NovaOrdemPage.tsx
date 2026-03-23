@@ -13,7 +13,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
-import { Loader2 } from "lucide-react";
+import { 
+  Loader2, 
+  UserCircle, 
+  Smartphone, 
+  ClipboardCheck, 
+  Wrench, 
+  Save, 
+  X,
+  DollarSign,
+  CalendarDays
+} from "lucide-react";
 
 // 1. Definimos o "Schema" de validação com o Zod
 const ordemSchema = z.object({
@@ -64,7 +74,7 @@ export default function NovaOrdemPage() {
     },
   });
 
- async function onSubmit(data: OrdemFormValues) {
+  async function onSubmit(data: OrdemFormValues) {
     setSaving(true);
     
     const payload = {
@@ -84,8 +94,6 @@ export default function NovaOrdemPage() {
     }
 
     // CORREÇÃO 2: Se o utilizador inseriu um valor inicial, registamos isso na tabela de serviços!
-    // Assim, quando a OrdemDetailPage recalcular os totais (ao adicionar peças), 
-    // este valor não será apagado, garantindo que o dinheiro não "some" da OS.
     if (data.valor_servico > 0) {
       await supabase.from("ordem_servico_servicos").insert({
         ordem_servico_id: result.id,
@@ -100,130 +108,237 @@ export default function NovaOrdemPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
-      <h1 className="text-2xl font-bold">Nova Ordem de Serviço</h1>
+    <div className="space-y-6 max-w-4xl mx-auto pb-8 animate-in fade-in duration-500">
+      
+      {/* Cabeçalho Premium */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card/40 border border-border/40 p-5 rounded-3xl backdrop-blur-sm shadow-sm">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight text-foreground flex items-center gap-3">
+            Nova Ordem de Serviço
+          </h1>
+          <p className="text-muted-foreground text-sm font-medium mt-1">Preencha os dados abaixo para iniciar um novo atendimento técnico.</p>
+        </div>
+      </div>
       
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-        <Card>
-          <CardHeader><CardTitle className="text-base">Cliente</CardTitle></CardHeader>
-          <CardContent>
+        
+        {/* BLOCO: CLIENTE */}
+        <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm overflow-hidden">
+          <CardHeader className="border-b border-border/40 bg-card/50 pb-4 px-6 pt-5">
+            <CardTitle className="text-base font-bold flex items-center gap-2 text-foreground tracking-wide">
+              <UserCircle className="h-5 w-5 text-primary" /> Dados do Cliente
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6">
             <div className="space-y-2">
+              <Label className="text-foreground/90 font-medium ml-1">Cliente Vinculado *</Label>
               <Controller
                 control={control}
                 name="cliente_id"
                 render={({ field }) => (
                   <Select onValueChange={field.onChange} defaultValue={field.value}>
-                    <SelectTrigger className={errors.cliente_id ? "border-red-500" : ""}>
-                      <SelectValue placeholder={loadingClientes ? "Carregando..." : "Selecione o cliente"} />
+                    <SelectTrigger className={`h-11 rounded-xl bg-card/50 border-border/50 focus:ring-primary transition-all ${errors.cliente_id ? "border-red-500 ring-1 ring-red-500/20" : ""}`}>
+                      <SelectValue placeholder={loadingClientes ? "Carregando clientes..." : "Selecione o cliente na lista"} />
                     </SelectTrigger>
-                    <SelectContent>
-                      {clientes.map((c) => (<SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>))}
+                    <SelectContent className="rounded-xl border-border/50 shadow-lg">
+                      {clientes.map((c) => (<SelectItem key={c.id} value={c.id} className="font-medium">{c.nome}</SelectItem>))}
                     </SelectContent>
                   </Select>
                 )}
               />
-              {errors.cliente_id && <p className="text-sm text-red-500">{errors.cliente_id.message}</p>}
+              {errors.cliente_id && <p className="text-sm text-red-500 font-medium ml-1">{errors.cliente_id.message}</p>}
             </div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader><CardTitle className="text-base">Dados do Aparelho</CardTitle></CardHeader>
-          <CardContent className="grid gap-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>Marca *</Label>
-                <Input {...register("marca_aparelho")} className={errors.marca_aparelho ? "border-red-500" : ""} />
-                {errors.marca_aparelho && <p className="text-sm text-red-500">{errors.marca_aparelho.message}</p>}
+        {/* BLOCO: DADOS DO APARELHO */}
+        <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm overflow-hidden">
+          <CardHeader className="border-b border-border/40 bg-card/50 pb-4 px-6 pt-5">
+            <CardTitle className="text-base font-bold flex items-center gap-2 text-foreground tracking-wide">
+              <Smartphone className="h-5 w-5 text-indigo-500" /> Detalhes do Aparelho
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6 grid gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <Label className="text-foreground/90 font-medium ml-1">Marca *</Label>
+                <Input 
+                  placeholder="Ex: Apple, Samsung, Motorola"
+                  {...register("marca_aparelho")} 
+                  className={`h-11 rounded-xl bg-card/50 border-border/50 focus-visible:ring-primary transition-all ${errors.marca_aparelho ? "border-red-500" : ""}`} 
+                />
+                {errors.marca_aparelho && <p className="text-sm text-red-500 font-medium ml-1">{errors.marca_aparelho.message}</p>}
               </div>
-              <div className="grid gap-2">
-                <Label>Modelo *</Label>
-                <Input {...register("modelo_aparelho")} className={errors.modelo_aparelho ? "border-red-500" : ""} />
-                {errors.modelo_aparelho && <p className="text-sm text-red-500">{errors.modelo_aparelho.message}</p>}
+              <div className="space-y-2">
+                <Label className="text-foreground/90 font-medium ml-1">Modelo *</Label>
+                <Input 
+                  placeholder="Ex: iPhone 13 Pro, Galaxy S22"
+                  {...register("modelo_aparelho")} 
+                  className={`h-11 rounded-xl bg-card/50 border-border/50 focus-visible:ring-primary transition-all ${errors.modelo_aparelho ? "border-red-500" : ""}`} 
+                />
+                {errors.modelo_aparelho && <p className="text-sm text-red-500 font-medium ml-1">{errors.modelo_aparelho.message}</p>}
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>IMEI</Label>
-                <Input {...register("imei")} className="font-mono" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <Label className="text-foreground/90 font-medium ml-1">IMEI ou Nº de Série</Label>
+                <Input 
+                  placeholder="Opcional"
+                  {...register("imei")} 
+                  className="h-11 rounded-xl bg-card/50 border-border/50 focus-visible:ring-primary transition-all font-mono text-sm" 
+                />
               </div>
-              <div className="grid gap-2">
-                <Label>Senha do Aparelho</Label>
-                <Input {...register("senha_aparelho")} />
+              <div className="space-y-2">
+                <Label className="text-foreground/90 font-medium ml-1">Senha do Aparelho</Label>
+                <Input 
+                  placeholder="Padrão, PIN ou descreva"
+                  {...register("senha_aparelho")} 
+                  className="h-11 rounded-xl bg-card/50 border-border/50 focus-visible:ring-primary transition-all"
+                />
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader><CardTitle className="text-base">Checklist de Entrada</CardTitle></CardHeader>
-          <CardContent className="grid gap-3">
-            {[
-              { id: "checklist_tela_quebrada" as const, label: "Tela quebrada" },
-              { id: "checklist_nao_liga" as const, label: "Não liga" },
-              { id: "checklist_molhado" as const, label: "Molhado / Líquido" },
-              { id: "checklist_bateria_ruim" as const, label: "Bateria ruim" },
-              { id: "checklist_camera_quebrada" as const, label: "Câmera quebrada" },
-            ].map((item) => (
-              <Controller
-                key={item.id}
-                control={control}
-                name={item.id}
-                render={({ field }) => (
-                  <div className="flex items-center gap-2">
-                    <Checkbox checked={field.value} onCheckedChange={field.onChange} id={item.id} />
-                    <Label htmlFor={item.id} className="cursor-pointer">{item.label}</Label>
-                  </div>
-                )}
+        {/* BLOCO: CHECKLIST */}
+        <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm overflow-hidden">
+          <CardHeader className="border-b border-border/40 bg-card/50 pb-4 px-6 pt-5">
+            <CardTitle className="text-base font-bold flex items-center gap-2 text-foreground tracking-wide">
+              <ClipboardCheck className="h-5 w-5 text-emerald-500" /> Checklist de Entrada
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+              {[
+                { id: "checklist_tela_quebrada" as const, label: "Ecrã / Tela quebrada" },
+                { id: "checklist_nao_liga" as const, label: "Aparelho não liga" },
+                { id: "checklist_molhado" as const, label: "Molhado / Líquido" },
+                { id: "checklist_bateria_ruim" as const, label: "Bateria degradada" },
+                { id: "checklist_camera_quebrada" as const, label: "Câmera danificada" },
+              ].map((item) => (
+                <Controller
+                  key={item.id}
+                  control={control}
+                  name={item.id}
+                  render={({ field }) => (
+                    // REMOVIDO o onClick da div para evitar conflito com o Checkbox/Label
+                    <div className="flex items-center gap-3 p-3 rounded-xl border border-border/40 bg-card/30 hover:bg-muted/30 transition-colors">
+                      <Checkbox 
+                        checked={field.value} 
+                        onCheckedChange={(checked) => field.onChange(checked)} 
+                        id={item.id} 
+                        className="rounded-md data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                      />
+                      <Label htmlFor={item.id} className="cursor-pointer font-medium text-sm text-foreground/80 select-none w-full">
+                        {item.label}
+                      </Label>
+                    </div>
+                  )}
+                />
+              ))}
+            </div>
+            <div className="space-y-2">
+              <Label className="text-foreground/90 font-medium ml-1">Outros Problemas Visíveis</Label>
+              <Input 
+                {...register("checklist_outros")} 
+                placeholder="Descreva arranhões, botões em falta, etc..." 
+                className="h-11 rounded-xl bg-card/50 border-border/50 focus-visible:ring-primary transition-all"
               />
-            ))}
-            <div className="grid gap-2 mt-2">
-              <Label>Outros</Label>
-              <Input {...register("checklist_outros")} placeholder="Descreva outros problemas visíveis..." />
             </div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader><CardTitle className="text-base">Problema e Diagnóstico</CardTitle></CardHeader>
-          <CardContent className="grid gap-4">
-            <div className="grid gap-2">
-              <Label>Problema Relatado *</Label>
-              <Textarea {...register("problema_relatado")} className={errors.problema_relatado ? "border-red-500" : ""} />
-              {errors.problema_relatado && <p className="text-sm text-red-500">{errors.problema_relatado.message}</p>}
+        {/* BLOCO: PROBLEMA E DIAGNÓSTICO */}
+        <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm overflow-hidden">
+          <CardHeader className="border-b border-border/40 bg-card/50 pb-4 px-6 pt-5">
+            <CardTitle className="text-base font-bold flex items-center gap-2 text-foreground tracking-wide">
+              <Wrench className="h-5 w-5 text-amber-500" /> Relato e Orçamento
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6 grid gap-6">
+            
+            <div className="space-y-2">
+              <Label className="text-foreground/90 font-medium ml-1">Problema Relatado pelo Cliente *</Label>
+              <Textarea 
+                placeholder="O que o cliente disse que está a acontecer com o aparelho?"
+                {...register("problema_relatado")} 
+                className={`min-h-[100px] resize-none rounded-xl bg-card/50 border-border/50 focus-visible:ring-primary transition-all ${errors.problema_relatado ? "border-red-500" : ""}`} 
+              />
+              {errors.problema_relatado && <p className="text-sm text-red-500 font-medium ml-1">{errors.problema_relatado.message}</p>}
             </div>
-            <div className="grid gap-2">
-              <Label>Diagnóstico</Label>
-              <Textarea {...register("diagnostico")} />
+
+            <div className="space-y-2">
+              <Label className="text-foreground/90 font-medium ml-1">Diagnóstico Técnico (Opcional)</Label>
+              <Textarea 
+                placeholder="Sua avaliação inicial (pode ser preenchido depois)"
+                {...register("diagnostico")} 
+                className="min-h-[100px] resize-none rounded-xl bg-card/50 border-border/50 focus-visible:ring-primary transition-all"
+              />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>Valor do Serviço (R$)</Label>
-                <Input type="number" step="0.01" {...register("valor_servico")} />
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-5 bg-card/40 rounded-2xl border border-border/40">
+              <div className="space-y-2">
+                <Label className="text-foreground/90 font-bold ml-1 flex items-center gap-1.5 text-primary">
+                  <DollarSign className="h-4 w-4" /> Valor do Serviço (R$)
+                </Label>
+                <Input 
+                  type="number" 
+                  step="0.01" 
+                  placeholder="0.00"
+                  {...register("valor_servico")} 
+                  className="h-11 rounded-xl bg-background border-border/60 focus-visible:ring-primary font-mono text-lg font-semibold transition-all"
+                />
               </div>
-              <div className="grid gap-2">
-                <Label>Previsão de Entrega</Label>
-                <Input type="date" {...register("data_previsao")} />
+              <div className="space-y-2">
+                <Label className="text-foreground/90 font-medium ml-1 flex items-center gap-1.5">
+                  <CalendarDays className="h-4 w-4 text-muted-foreground" /> Previsão de Entrega
+                </Label>
+                <Input 
+                  type="date" 
+                  {...register("data_previsao")} 
+                  className="h-11 rounded-xl bg-background border-border/60 focus-visible:ring-primary transition-all text-muted-foreground"
+                />
               </div>
             </div>
-            <div className="grid gap-2">
-              <Label>Observações</Label>
-              <Textarea {...register("observacoes")} />
+
+            <div className="space-y-2">
+              <Label className="text-foreground/90 font-medium ml-1">Observações Internas</Label>
+              <Textarea 
+                placeholder="Anotações visíveis apenas para a equipa técnica..."
+                {...register("observacoes")} 
+                className="min-h-[80px] resize-none rounded-xl bg-card/50 border-border/50 focus-visible:ring-primary transition-all"
+              />
             </div>
+
           </CardContent>
         </Card>
 
-        <div className="flex gap-3 pb-8">
-          <Button type="submit" disabled={saving || loadingClientes}>
+        {/* BARRA DE AÇÕES INFERIOR */}
+        <div className="flex flex-col-reverse sm:flex-row gap-3 pt-4 pb-8">
+          <Button 
+            type="button" 
+            variant="outline" 
+            onClick={() => navigate("/ordens")} 
+            disabled={saving}
+            className="h-12 px-6 rounded-xl border-border/60 font-medium hover:bg-muted/80 transition-colors w-full sm:w-auto"
+          >
+            <X className="mr-2 h-4 w-4" /> Cancelar
+          </Button>
+          <Button 
+            type="submit" 
+            disabled={saving || loadingClientes}
+            className="h-12 px-8 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold shadow-lg shadow-primary/20 transition-all w-full sm:w-auto sm:ml-auto"
+          >
             {saving ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Salvando...
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                Registando OS...
               </>
-            ) : "Criar Ordem de Serviço"}
-          </Button>
-          <Button type="button" variant="outline" onClick={() => navigate("/ordens")} disabled={saving}>
-            Cancelar
+            ) : (
+              <>
+                <Save className="mr-2 h-5 w-5" /> Criar Ordem de Serviço
+              </>
+            )}
           </Button>
         </div>
       </form>
