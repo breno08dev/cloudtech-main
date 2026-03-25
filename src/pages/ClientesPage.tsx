@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Search, Pencil, Trash2, Loader2, Users, UserCircle } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, Loader2, Users, UserCircle, ChevronLeft, ChevronRight, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 
 interface Cliente {
@@ -51,6 +51,13 @@ export default function ClientesPage() {
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  
+  // Estado para Modal de Exclusão Profissional
+  const [itemToDelete, setItemToDelete] = useState<string | null>(null);
+
+  // Estado para Paginação
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   const { register, handleSubmit, control, reset, formState: { errors } } = useForm<ClienteFormValues>({
     resolver: zodResolver(clienteSchema),
@@ -109,10 +116,14 @@ export default function ClientesPage() {
     },
     onSuccess: () => {
       toast.success("Cliente excluído com sucesso");
+      setItemToDelete(null);
       queryClient.invalidateQueries({ queryKey: ["clientes"] });
       queryClient.invalidateQueries({ queryKey: ["clientes_select"] });
     },
-    onError: () => toast.error("Não é possível excluir um cliente com Ordens de Serviço vinculadas."),
+    onError: () => {
+      toast.error("Não é possível excluir um cliente com Ordens de Serviço vinculadas.");
+      setItemToDelete(null);
+    },
   });
 
   function onSubmit(data: ClienteFormValues) {
@@ -140,9 +151,34 @@ export default function ClientesPage() {
     }
   }
 
+  // --- LÓGICA DE PAGINAÇÃO ---
+  const totalItems = clientes.length;
+  const totalPages = Math.ceil(totalItems / itemsPerPage);
+  const paginatedClientes = clientes.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   return (
-    <div className="flex flex-col gap-6 pb-8 animate-in fade-in duration-500">
+    <div className="flex flex-col gap-6 pb-8 animate-in fade-in duration-500 max-w-7xl mx-auto w-full">
       
+      {/* Modal Excluir Cliente */}
+      <Dialog open={!!itemToDelete} onOpenChange={(open) => !open && setItemToDelete(null)}>
+        <DialogContent className="sm:max-w-sm rounded-[2rem] p-6 text-center border-red-500/20 shadow-2xl">
+          <div className="mx-auto bg-red-500/10 p-4 rounded-full w-fit mb-3"><AlertCircle className="h-8 w-8 text-red-500" /></div>
+          <DialogTitle className="text-2xl font-black mb-2 text-foreground">Excluir Cliente</DialogTitle>
+          <p className="text-sm text-muted-foreground font-medium mb-6 px-2">Tem certeza que deseja excluir permanentemente este cliente do sistema? Esta ação não poderá ser desfeita.</p>
+          
+          <Button 
+            onClick={() => { if(itemToDelete) deleteMutation.mutate(itemToDelete); }} 
+            disabled={deleteMutation.isPending} 
+            variant="destructive" 
+            className="w-full h-12 rounded-xl font-bold text-base shadow-lg shadow-red-500/20 hover:bg-red-600 transition-colors"
+          >
+            {deleteMutation.isPending ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <Trash2 className="h-5 w-5 mr-2" />}
+            Sim, Excluir Cliente
+          </Button>
+          <Button variant="ghost" onClick={() => setItemToDelete(null)} className="w-full mt-2 font-bold rounded-xl h-11 hover:bg-muted/80">Cancelar</Button>
+        </DialogContent>
+      </Dialog>
+
       {/* Cabeçalho Premium */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card/60 border border-border/40 p-6 rounded-[2rem] backdrop-blur-xl shadow-sm shrink-0">
         <div>
@@ -234,14 +270,17 @@ export default function ClientesPage() {
       <div className="relative w-full max-w-md group">
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground/70 group-focus-within:text-primary transition-colors" />
         <Input 
-          placeholder="Buscar por nome, telefone ou CPF..." 
+          placeholder="Buscar por nome, telefone ou CPF/CNPJ..." 
           className="pl-12 h-14 text-base rounded-2xl bg-card/60 border-border/50 focus-visible:ring-primary backdrop-blur-md transition-all shadow-sm w-full font-medium" 
           value={search} 
-          onChange={(e) => setSearch(e.target.value)} 
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setCurrentPage(1); // Volta para a página 1 ao pesquisar
+          }} 
         />
       </div>
 
-      {/* Tabela de Dados (Premium) */}
+      {/* Tabela de Dados (Premium) com Paginação */}
       <Card className="rounded-[2rem] border-border/40 shadow-xl shadow-black/5 bg-card/60 backdrop-blur-xl overflow-hidden flex flex-col relative">
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -271,7 +310,7 @@ export default function ClientesPage() {
                       Erro ao carregar os clientes.
                     </TableCell>
                   </TableRow>
-                ) : clientes.length === 0 ? (
+                ) : paginatedClientes.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="text-center py-16">
                       <div className="flex flex-col items-center gap-2">
@@ -281,7 +320,7 @@ export default function ClientesPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  clientes.map((c) => (
+                  paginatedClientes.map((c) => (
                     <TableRow key={c.id} className={`hover:bg-background/80 transition-all duration-200 border-border/30 group ${isFetching ? 'opacity-60' : ''}`}>
                       <TableCell className="font-bold text-sm text-foreground/90 pl-6 py-4">{c.nome}</TableCell>
                       <TableCell className="font-mono text-sm text-muted-foreground font-medium">
@@ -305,8 +344,7 @@ export default function ClientesPage() {
                           <Button 
                             variant="ghost" 
                             size="icon" 
-                            onClick={() => window.confirm("Tem certeza que deseja excluir este cliente?") && deleteMutation.mutate(c.id)}
-                            disabled={deleteMutation.isPending}
+                            onClick={() => setItemToDelete(c.id)}
                             className="h-9 w-9 rounded-xl hover:bg-destructive/10 hover:text-destructive"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -319,6 +357,25 @@ export default function ClientesPage() {
               </TableBody>
             </Table>
           </div>
+
+          {/* --- BARRA DE PAGINAÇÃO --- */}
+          {!isLoading && totalPages > 1 && (
+            <div className="p-4 border-t border-border/40 bg-muted/10 flex items-center justify-between text-sm shrink-0">
+              <span className="text-muted-foreground font-medium hidden sm:inline-block ml-2">
+                Mostrando <span className="font-bold text-foreground">{(currentPage - 1) * itemsPerPage + 1}</span> a <span className="font-bold text-foreground">{Math.min(currentPage * itemsPerPage, totalItems)}</span> de <span className="font-bold text-foreground">{totalItems}</span> clientes
+              </span>
+              <div className="flex items-center gap-2 ml-auto sm:ml-0 mr-2">
+                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="h-9 rounded-xl font-bold bg-background">
+                  <ChevronLeft className="h-4 w-4 mr-1" /> Anterior
+                </Button>
+                <span className="text-xs font-bold px-3 text-muted-foreground">Pág. {currentPage} de {totalPages}</span>
+                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="h-9 rounded-xl font-bold bg-background">
+                  Próxima <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
+
         </CardContent>
       </Card>
     </div>

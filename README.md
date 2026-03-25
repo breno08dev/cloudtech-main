@@ -1,12 +1,12 @@
-## Melhorias ✅
+## Melhorias 
  -> Arrumar impressão cupom impressora térmica  (Deixar por ultimo)
  -> Arrumar campo de busca de clientes dentro de Ordem de Serviço (Facilitando a busca de dados)
  --> Arrumar responsividade do card do carrinho em PDV
  -> Colocar o relatorio detalhado de vendas. (Colocar senha padrão informada para acessar.)
 
-## Senha: 911723
+## Senha: 911723✅
 
---> Colocar senha para acessar produtos. 
+--> Colocar senha para acessar produtos. ✅
 --> Colocar senha para acessar relatorio financeiro.
 
 
@@ -26,7 +26,7 @@ banco de dado.
 
 
 
---> Olhar o botao de salvar OS, não funcionou 
+--> Olhar o botao de salvar OS, não funcionou ✅
 @supabase_supabase-j…js?v=cd439fbb:12773 
  PATCH https://vpxvvwzaxtzjclkdidfu.supabase.co/rest/v1/ordens_servico?id=eq.54255374-add6-4950-9b75-f92523d432ae 400 (Bad Request)
 

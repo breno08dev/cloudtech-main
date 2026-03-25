@@ -17,7 +17,9 @@ import OrdemDetailPage from "./pages/OrdemDetailPage";
 import VendasPage from "./pages/VendasPage";
 import RelatoriosPage from "./pages/RelatoriosPage";
 import ConfiguracoesPage from "./pages/ConfiguracoesPage";
+import FinanceiroPage from "./pages/FinanceiroPage"; // Import da nova página
 import NotFound from "./pages/NotFound";
+import PasswordGate from "./components/PasswordGate";
 
 const queryClient = new QueryClient();
 
@@ -43,11 +45,9 @@ const App = () => {
       <TooltipProvider>
         <Toaster />
         <Sonner />
-        {/* O BrowserRouter agora envolve TUDO, garantindo que o useNavigate funcione no Login! */}
         <BrowserRouter>
           {!session ? (
             <Routes>
-              {/* Se não houver sessão, qualquer URL cai no Login */}
               <Route path="*" element={<LoginPage onLogin={() => {}} />} />
             </Routes>
           ) : (
@@ -55,12 +55,31 @@ const App = () => {
               <Routes>
                 <Route path="/" element={<DashboardPage />} />
                 <Route path="/clientes" element={<ClientesPage />} />
-                <Route path="/produtos" element={<ProdutosPage />} />
+                
+                <Route path="/produtos" element={
+                  <PasswordGate>
+                    <ProdutosPage />
+                  </PasswordGate>
+                } />
+                
                 <Route path="/ordens" element={<OrdensListPage />} />
                 <Route path="/ordens/nova" element={<NovaOrdemPage />} />
                 <Route path="/ordens/:id" element={<OrdemDetailPage />} />
                 <Route path="/vendas" element={<VendasPage />} />
-                <Route path="/relatorios" element={<RelatoriosPage />} />
+                
+                {/* Nova Rota Financeira (Protegida) */}
+                <Route path="/financeiro" element={
+                  <PasswordGate>
+                    <FinanceiroPage />
+                  </PasswordGate>
+                } />
+
+                <Route path="/relatorios" element={
+                  <PasswordGate>
+                    <RelatoriosPage />
+                  </PasswordGate>
+                } />
+                
                 <Route path="/configuracoes" element={<ConfiguracoesPage />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>

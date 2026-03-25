@@ -1,15 +1,16 @@
 import { Link, useLocation } from "react-router-dom";
-import { 
-  Home, 
-  Wrench, 
-  ShoppingCart, 
-  Users, 
-  Package, 
-  Wallet, 
-  Settings, 
-  PlusCircle, 
+import {
+  Home,
+  Wrench,
+  ShoppingCart,
+  Users,
+  Package,
+  Wallet,
+  Settings,
+  PlusCircle,
   List,
-  LogOut 
+  LogOut,
+  Banknote // Novo ícone para o Financeiro
 } from "lucide-react";
 import {
   Sidebar,
@@ -24,14 +25,13 @@ import {
   SidebarMenuSub,
   SidebarMenuSubItem,
   SidebarMenuSubButton,
-  useSidebar, 
+  useSidebar,
 } from "@/components/ui/sidebar";
-// IMPORTANTE: Importamos o cliente do Supabase para fazer o logout real
 import { supabase } from "@/integrations/supabase/client";
 
 export function AppSidebar() {
   const location = useLocation();
-  const { setOpenMobile } = useSidebar(); 
+  const { setOpenMobile } = useSidebar();
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -39,11 +39,10 @@ export function AppSidebar() {
     setOpenMobile(false);
   };
 
-  // Nova função responsável por deslogar do sistema
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut();
-      setOpenMobile(false); // Fecha o menu no telemóvel ao sair
+      setOpenMobile(false);
     } catch (error) {
       console.error("Erro ao fazer logout:", error);
     }
@@ -52,13 +51,12 @@ export function AppSidebar() {
   return (
     <Sidebar className="border-r border-border/40 bg-sidebar/95 backdrop-blur-xl shadow-sm print:hidden">
       
-      {/* Cabeçalho da Sidebar (Logo Personalizada) */}
       <SidebarHeader className="p-6 border-b border-border/30 flex items-center justify-center">
         <Link to="/" onClick={handleLinkClick} className="w-full flex justify-center transition-transform hover:scale-105 duration-300">
-          <img 
-            src="/conectnewlogo.png" 
-            alt="Conect New" 
-            className="max-h-16 w-auto object-contain drop-shadow-md dark:brightness-110"
+          <img
+            src="/conectnewlogo.png"
+            alt="Conect New"
+            className="max-h-28 w-auto object-contain drop-shadow-md dark:brightness-110"
             onError={(e) => {
               e.currentTarget.style.display = 'none';
               e.currentTarget.parentElement?.insertAdjacentHTML('beforeend', '<span class="font-black text-xl text-primary uppercase tracking-widest">Conect New</span>');
@@ -157,14 +155,26 @@ export function AppSidebar() {
             <SidebarGroupLabel className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-bold ml-1 mb-2">Administração</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
+                
+                {/* NOVO MENU: GESTÃO FINANCEIRA */}
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={isActive("/relatorios")} tooltip="Relatórios" className="font-medium hover:bg-primary/5">
+                  <SidebarMenuButton asChild isActive={isActive("/financeiro")} tooltip="Financeiro" className="font-medium hover:bg-primary/5">
+                    <Link to="/financeiro" onClick={handleLinkClick}>
+                      <Banknote className="h-4 w-4 text-emerald-500" />
+                      <span>Gestão Financeira</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={isActive("/relatorios")} tooltip="Relatórios" className="font-medium mt-1 hover:bg-primary/5">
                     <Link to="/relatorios" onClick={handleLinkClick}>
                       <Wallet className="h-4 w-4 text-purple-500" />
                       <span>Inteligência Financeira</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
+                
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild isActive={isActive("/configuracoes")} tooltip="Configurações" className="font-medium mt-1 hover:bg-primary/5">
                     <Link to="/configuracoes" onClick={handleLinkClick}>
@@ -184,10 +194,9 @@ export function AppSidebar() {
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  {/* Trocamos o Link por um onClick que chama a função do Supabase */}
-                  <SidebarMenuButton 
+                  <SidebarMenuButton
                     onClick={handleLogout}
-                    tooltip="Sair do Sistema" 
+                    tooltip="Sair do Sistema"
                     className="font-medium text-destructive hover:bg-destructive/10 hover:text-destructive transition-colors group cursor-pointer"
                   >
                     <LogOut className="h-4 w-4 transition-transform group-hover:-translate-x-1" />

@@ -6,12 +6,19 @@ import { Button } from "@/components/ui/button";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { DollarSign, ShoppingCart, Wrench, AlertTriangle, TrendingUp, TrendingDown, Package, Loader2, Eye, EyeOff } from "lucide-react";
 
+// Tipagem explícita para evitar erros do TypeScript com o Map
+interface VarMapInfo {
+  nomeBase: string;
+  qualidade: string;
+  estoque: number;
+  min: number;
+}
+
 export default function DashboardPage() {
-  // Estado para controlar a visibilidade dos valores financeiros
   const [showValues, setShowValues] = useState(false);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["dashboard_metrics"],
+    queryKey: ["dashboard_metrics_v2"],
     queryFn: async () => {
       const hoje = new Date();
       
@@ -26,16 +33,32 @@ export default function DashboardPage() {
       const [
         { data: vendas },
         { data: ordens },
-        { data: produtos },
+        { data: produtoBases },
+        { data: produtoVariacoes },
         { data: itensVenda },
         { data: pecasOs }
       ] = await Promise.all([
-        supabase.from("vendas").select("valor_total, created_at").gte("created_at", inicioMes),
+        supabase.from("vendas").select("id, valor_total, created_at").gte("created_at", inicioMes),
         supabase.from("ordens_servico").select("id, valor_total, data_finalizacao, status, created_at"),
-        supabase.from("produtos").select("id, nome, estoque, estoque_minimo").order("estoque", { ascending: true }),
-        supabase.from("venda_itens").select("quantidade, produtos(nome)").gte("created_at", inicioMes),
-        supabase.from("ordem_servico_pecas").select("quantidade, ordem_servico_id, produtos(nome)")
+        (supabase as any).from("produto_base").select("id, nome"),
+        (supabase as any).from("produto_variacoes").select("id, produto_id, estoque, estoque_minimo, qualidade"),
+        (supabase as any).from("venda_itens").select("produto_id, quantidade").gte("created_at", inicioMes),
+        (supabase as any).from("ordem_servico_pecas").select("produto_id, quantidade, ordem_servico_id")
       ]);
+
+      // --- MAPEAMENTO EM MEMÓRIA ---
+      const baseMap = new Map<string, string>((produtoBases || []).map((b: any) => [b.id, b.nome]));
+      
+      // Usando a tipagem explícita VarMapInfo
+      const varMap = new Map<string, VarMapInfo>((produtoVariacoes || []).map((v: any) => [
+        v.id, 
+        { 
+          nomeBase: baseMap.get(v.produto_id) || "Produto", 
+          qualidade: v.qualidade, 
+          estoque: v.estoque, 
+          min: v.estoque_minimo 
+        }
+      ]));
 
       // --- 1. CÁLCULOS DOS KPIs FINANCEIROS ---
       let fatMesAtual = 0;
@@ -65,9 +88,17 @@ export default function DashboardPage() {
       });
 
       // --- ALERTA DE ESTOQUE ---
-      const produtosBaixoEstoque = (produtos || [])
-        .filter(p => p.estoque <= p.estoque_minimo)
-        .map(p => ({ id: p.id, nome: p.nome, estoque: p.estoque }));
+      const produtosBaixoEstoque = (produtoVariacoes || [])
+        .filter((v: any) => v.estoque <= v.estoque_minimo)
+        .map((v: any) => {
+          const nomeBase = baseMap.get(v.produto_id) || "Produto Desconhecido";
+          return { 
+            id: v.id, 
+            nome: `${nomeBase} (${v.qualidade})`, 
+            estoque: v.estoque 
+          };
+        })
+        .sort((a: any, b: any) => a.estoque - b.estoque);
 
       // --- 2. GRÁFICO COMBINADO (ÚLTIMOS 7 DIAS) ---
       const historicoMap = new Map<string, { data: string; PDV: number; Serviços: number }>();
@@ -89,18 +120,20 @@ export default function DashboardPage() {
         if (historicoMap.has(chave)) historicoMap.get(chave)!.Serviços += Number(o.valor_total);
       });
 
-      // --- 3. RANKING DE PRODUTOS INTELIGENTE ---
+      // --- 3. RANKING DE PRODUTOS ---
       const rankingMap = new Map<string, number>();
       
-      itensVenda?.forEach(item => {
-        const nome = (item.produtos as any)?.nome || "Produto Desconhecido";
-        rankingMap.set(nome, (rankingMap.get(nome) || 0) + item.quantidade);
+      itensVenda?.forEach((item: any) => {
+        const info = varMap.get(item.produto_id); // info agora é tipado como VarMapInfo | undefined
+        const nomeCompleto = info ? `${info.nomeBase} - ${info.qualidade}` : "Item Excluído";
+        rankingMap.set(nomeCompleto, (rankingMap.get(nomeCompleto) || 0) + item.quantidade);
       });
       
-      pecasOs?.forEach(peca => {
+      pecasOs?.forEach((peca: any) => {
         if (osEntreguesMesIds.has(peca.ordem_servico_id)) {
-          const nome = (peca.produtos as any)?.nome || "Peça Desconhecida";
-          rankingMap.set(nome, (rankingMap.get(nome) || 0) + peca.quantidade);
+          const info = varMap.get(peca.produto_id);
+          const nomeCompleto = info ? `${info.nomeBase} - ${info.qualidade}` : "Item Excluído";
+          rankingMap.set(nomeCompleto, (rankingMap.get(nomeCompleto) || 0) + peca.quantidade);
         }
       });
 
@@ -125,10 +158,9 @@ export default function DashboardPage() {
   const { kpis, graficoData, maisVendidos, menosVendidos } = data;
 
   return (
-    <div className="flex flex-col gap-6 pb-8 animate-in fade-in duration-500">
+    <div className="flex flex-col gap-6 pb-12 animate-in fade-in duration-500 max-w-7xl mx-auto w-full">
       
-      {/* Header com Botão de Ocultar Valores */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card/40 border border-border/40 p-5 rounded-3xl backdrop-blur-sm shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card/40 border border-border/40 p-5 rounded-3xl backdrop-blur-sm shadow-sm shrink-0">
         <div>
           <h1 className="text-2xl font-black tracking-tight text-foreground flex items-center gap-3">
             Visão Geral do Negócio
@@ -147,9 +179,7 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 items-stretch">
         
-        {/* KPI: Faturamento do Mês (Premium Card) */}
-        <Card className="rounded-3xl border-none shadow-lg shadow-primary/10 bg-gradient-to-br from-primary to-primary/80 text-primary-foreground flex flex-col h-full relative overflow-hidden transition-transform hover:-translate-y-1 duration-300">
-          {/* Padrão abstrato no fundo */}
+        <Card className="rounded-3xl border-none shadow-lg shadow-primary/10 bg-gradient-to-br from-primary to-primary/80 text-primary-foreground flex flex-col min-h-[140px] relative overflow-hidden transition-transform hover:-translate-y-1 duration-300">
           <div className="absolute inset-0 opacity-[0.1] mix-blend-overlay pointer-events-none">
             <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
               <defs>
@@ -168,116 +198,108 @@ export default function DashboardPage() {
                   R$ {showValues ? kpis.fatMesAtual.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : "••••••"}
                 </p>
               </div>
-              <div className="bg-background/20 backdrop-blur-md p-3 rounded-2xl shadow-inner"><DollarSign className="h-6 w-6 text-primary-foreground" /></div>
+              <div className="bg-background/20 backdrop-blur-md p-3 rounded-2xl shadow-inner shrink-0"><DollarSign className="h-6 w-6 text-primary-foreground" /></div>
             </div>
           </CardContent>
         </Card>
 
-        {/* KPI: Caixa de Hoje */}
-        <Card className="rounded-3xl border-border/40 shadow-sm bg-card/60 backdrop-blur-sm hover:shadow-md hover:bg-card hover:-translate-y-1 transition-all duration-300 flex flex-col h-full">
+        <Card className="rounded-3xl border-border/40 shadow-sm bg-card/60 backdrop-blur-sm hover:shadow-md hover:bg-card hover:-translate-y-1 transition-all duration-300 flex flex-col min-h-[140px]">
           <CardContent className="p-6 flex-1 flex flex-col justify-center">
             <div className="flex justify-between items-start">
               <div className="space-y-2">
                 <p className="text-muted-foreground font-medium text-sm tracking-wide">Caixa de Hoje</p>
-                <p className="text-2xl font-bold tracking-tight text-foreground">
+                <p className="text-3xl font-black tracking-tighter text-foreground">
                   R$ {showValues ? kpis.fatHoje.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : "••••••"}
                 </p>
               </div>
-              <div className="bg-emerald-500/10 p-3 rounded-2xl border border-emerald-500/20"><ShoppingCart className="h-6 w-6 text-emerald-500" /></div>
+              <div className="bg-emerald-500/10 p-3 rounded-2xl border border-emerald-500/20 shrink-0"><ShoppingCart className="h-6 w-6 text-emerald-500" /></div>
             </div>
           </CardContent>
         </Card>
 
-        {/* KPI: OS em Andamento */}
-        <Card className="rounded-3xl border-border/40 shadow-sm bg-card/60 backdrop-blur-sm hover:shadow-md hover:bg-card hover:-translate-y-1 transition-all duration-300 flex flex-col h-full">
+        <Card className="rounded-3xl border-border/40 shadow-sm bg-card/60 backdrop-blur-sm hover:shadow-md hover:bg-card hover:-translate-y-1 transition-all duration-300 flex flex-col min-h-[140px]">
           <CardContent className="p-6 flex-1 flex flex-col justify-center">
             <div className="flex justify-between items-start">
               <div className="space-y-2">
                 <p className="text-muted-foreground font-medium text-sm tracking-wide">OS na Bancada</p>
-                <p className="text-2xl font-bold tracking-tight text-foreground flex items-baseline gap-1">
+                <p className="text-3xl font-black tracking-tighter text-foreground flex items-baseline gap-1">
                   {kpis.osEmAndamento} <span className="text-sm font-medium text-muted-foreground tracking-normal">Ordens</span>
                 </p>
               </div>
-              <div className="bg-amber-500/10 p-3 rounded-2xl border border-amber-500/20"><Wrench className="h-6 w-6 text-amber-500" /></div>
+              <div className="bg-amber-500/10 p-3 rounded-2xl border border-amber-500/20 shrink-0"><Wrench className="h-6 w-6 text-amber-500" /></div>
             </div>
           </CardContent>
         </Card>
 
-        {/* KPI: Alerta de Estoque com Micro-Lista */}
-        <Card className="rounded-3xl border-border/40 shadow-sm bg-card/60 backdrop-blur-sm hover:shadow-md hover:bg-card hover:-translate-y-1 transition-all duration-300 flex flex-col h-full">
-          <CardContent className="p-5 flex-1 flex flex-col">
-            <div className="flex justify-between items-start mb-3">
+        <Card className="rounded-3xl border-border/40 shadow-sm bg-card/60 backdrop-blur-sm hover:shadow-md hover:bg-card hover:-translate-y-1 transition-all duration-300 flex flex-col min-h-[140px]">
+          <CardContent className="p-5 flex-1 flex flex-col h-full">
+            <div className="flex justify-between items-start mb-3 shrink-0">
               <div className="space-y-1">
                 <p className="text-muted-foreground font-medium text-sm tracking-wide">Alerta de Estoque</p>
-                <p className="text-2xl font-bold tracking-tight text-foreground flex items-baseline gap-1">
-                  {kpis.produtosBaixoEstoque.length} <span className="text-sm font-medium text-muted-foreground tracking-normal">Itens críticos</span>
+                <p className="text-2xl font-black tracking-tighter text-foreground flex items-baseline gap-1">
+                  {kpis.produtosBaixoEstoque.length} <span className="text-sm font-medium text-muted-foreground tracking-normal">Itens Críticos</span>
                 </p>
               </div>
-              <div className="bg-red-500/10 p-2.5 rounded-2xl border border-red-500/20"><AlertTriangle className="h-5 w-5 text-red-500" /></div>
+              <div className="bg-red-500/10 p-2.5 rounded-2xl border border-red-500/20 shrink-0"><AlertTriangle className="h-5 w-5 text-red-500" /></div>
             </div>
             
-            {kpis.produtosBaixoEstoque.length > 0 && (
-              <div className="mt-auto space-y-1.5 pt-2">
-                {kpis.produtosBaixoEstoque.slice(0, 3).map(p => (
-                  <div key={p.id} className="flex justify-between items-center text-xs bg-red-500/5 px-3 py-1.5 rounded-xl border border-red-500/10 transition-colors hover:bg-red-500/10">
-                    <span className="truncate font-medium text-foreground/80 pr-2">{p.nome}</span>
-                    <span className="font-bold text-red-600 dark:text-red-400 whitespace-nowrap bg-red-500/10 px-1.5 py-0.5 rounded-md">{p.estoque} un</span>
-                  </div>
-                ))}
-                {kpis.produtosBaixoEstoque.length > 3 && (
-                  <p className="text-[10px] text-muted-foreground/70 text-center font-bold tracking-wider pt-1 uppercase">
-                    + {kpis.produtosBaixoEstoque.length - 3} outros
-                  </p>
-                )}
-              </div>
-            )}
+            <div className="flex-1 overflow-y-auto pr-1 space-y-1.5 min-h-[40px]">
+              {kpis.produtosBaixoEstoque.length === 0 && (
+                <p className="text-xs text-muted-foreground">Estoque saudável.</p>
+              )}
+              {kpis.produtosBaixoEstoque.slice(0, 3).map((p: any) => (
+                <div key={p.id} className="flex justify-between items-center text-xs bg-red-500/5 px-3 py-1.5 rounded-xl border border-red-500/10 transition-colors hover:bg-red-500/10">
+                  <span className="truncate font-medium text-foreground/80 pr-2">{p.nome}</span>
+                  <span className="font-bold text-red-600 dark:text-red-400 whitespace-nowrap bg-red-500/10 px-1.5 py-0.5 rounded-md">{p.estoque} un</span>
+                </div>
+              ))}
+              {kpis.produtosBaixoEstoque.length > 3 && (
+                <p className="text-[10px] text-muted-foreground/70 text-center font-bold tracking-wider pt-1 uppercase">
+                  + {kpis.produtosBaixoEstoque.length - 3} outros
+                </p>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         
-        {/* GRÁFICO: Vendas PDV vs Serviços OS */}
-        <Card className="lg:col-span-2 rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm flex flex-col overflow-hidden">
-          <CardHeader className="border-b border-border/40 pb-4 px-6 pt-6 bg-card">
-            <CardTitle className="text-base font-bold text-foreground">Entradas Financeiras: PDV vs Serviços (7 dias)</CardTitle>
+        <Card className="xl:col-span-2 rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm flex flex-col overflow-hidden">
+          <CardHeader className="border-b border-border/40 pb-4 px-6 pt-6 bg-card shrink-0">
+            <CardTitle className="text-base font-bold text-foreground">Entradas Financeiras: PDV vs Serviços (Últimos 7 dias)</CardTitle>
           </CardHeader>
-          <CardContent className="p-6 pt-8 flex-1 bg-card/30">
-            <div className="h-[320px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={graficoData} margin={{ top: 0, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.6} />
-                  <XAxis dataKey="data" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))', fontWeight: 500 }} dy={10} />
-                  <YAxis 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))', fontWeight: 500 }} 
-                    tickFormatter={(value) => showValues ? `R$${value}` : ""} 
-                  />
-                  <Tooltip 
-                    cursor={{ fill: 'hsl(var(--muted))', opacity: 0.3 }}
-                    contentStyle={{ borderRadius: '16px', border: '1px solid hsl(var(--border))', boxShadow: '0 20px 40px -10px rgba(0,0,0,0.15)', backgroundColor: 'hsl(var(--card))', color: 'hsl(var(--foreground))' }}
-                    formatter={(value: number) => [`R$ ${showValues ? value.toFixed(2) : "••••"}`, "Valor"]}
-                    labelStyle={{ fontWeight: 'bold', color: 'hsl(var(--muted-foreground))', marginBottom: '8px' }}
-                  />
-                  <Legend verticalAlign="top" height={40} iconType="circle" wrapperStyle={{ paddingBottom: '20px', fontSize: '13px', fontWeight: 500 }} />
-                  {/* Cores alinhadas com o novo tema */}
-                  <Bar dataKey="PDV" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} barSize={28} />
-                  <Bar dataKey="Serviços" fill="hsl(var(--status-ready))" radius={[6, 6, 0, 0]} barSize={28} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+          <CardContent className="p-6 pt-8 flex-1 bg-card/30 min-h-[350px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={graficoData} margin={{ top: 0, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.6} />
+                <XAxis dataKey="data" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))', fontWeight: 500 }} dy={10} />
+                <YAxis 
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))', fontWeight: 500 }} 
+                  tickFormatter={(value) => showValues ? `R$${value}` : ""} 
+                />
+                <Tooltip 
+                  cursor={{ fill: 'hsl(var(--muted))', opacity: 0.3 }}
+                  contentStyle={{ borderRadius: '16px', border: '1px solid hsl(var(--border))', boxShadow: '0 20px 40px -10px rgba(0,0,0,0.15)', backgroundColor: 'hsl(var(--card))', color: 'hsl(var(--foreground))' }}
+                  formatter={(value: number) => [`R$ ${showValues ? value.toFixed(2) : "••••"}`, "Valor"]}
+                  labelStyle={{ fontWeight: 'bold', color: 'hsl(var(--muted-foreground))', marginBottom: '8px' }}
+                />
+                <Legend verticalAlign="top" height={40} iconType="circle" wrapperStyle={{ paddingBottom: '20px', fontSize: '13px', fontWeight: 500 }} />
+                <Bar dataKey="PDV" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} barSize={32} />
+                <Bar dataKey="Serviços" fill="hsl(var(--status-ready))" radius={[6, 6, 0, 0]} barSize={32} />
+              </BarChart>
+            </ResponsiveContainer>
           </CardContent>
         </Card>
 
-        {/* RANKINGS DE PRODUTOS */}
-        <div className="space-y-6 flex flex-col h-full">
+        <div className="space-y-6 flex flex-col">
           
-          {/* Top 5 Mais Vendidos */}
           <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm flex-1 flex flex-col">
-            <CardHeader className="border-b border-border/40 pb-4 px-5 pt-5 bg-card">
+            <CardHeader className="border-b border-border/40 pb-4 px-5 pt-5 bg-card shrink-0">
               <CardTitle className="text-sm font-bold flex items-center gap-2 text-foreground tracking-wide uppercase">
-                <TrendingUp className="h-4 w-4 text-emerald-500" /> Mais Vendidos
+                <TrendingUp className="h-4 w-4 text-emerald-500" /> Mais Vendidos do Mês
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0 flex-1">
@@ -299,9 +321,8 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          {/* Top 5 Menos Vendidos */}
           <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm flex-1 flex flex-col">
-            <CardHeader className="border-b border-border/40 pb-4 px-5 pt-5 bg-card">
+            <CardHeader className="border-b border-border/40 pb-4 px-5 pt-5 bg-card shrink-0">
               <CardTitle className="text-sm font-bold flex items-center gap-2 text-foreground tracking-wide uppercase">
                 <TrendingDown className="h-4 w-4 text-red-500" /> Baixa Rotação
               </CardTitle>
