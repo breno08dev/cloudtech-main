@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppLayout } from "@/components/AppLayout";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import ClientesPage from "./pages/ClientesPage";
@@ -35,40 +36,36 @@ const App = () => {
     });
   }, []);
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground">Carregando...</div>;
-
-  if (!session) {
-    return (
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <LoginPage onLogin={() => {}} />
-        </TooltipProvider>
-      </QueryClientProvider>
-    );
-  }
+  if (loading) return <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground font-medium animate-pulse">Carregando...</div>;
 
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
         <Sonner />
+        {/* O BrowserRouter agora envolve TUDO, garantindo que o useNavigate funcione no Login! */}
         <BrowserRouter>
-          <AppLayout>
+          {!session ? (
             <Routes>
-              <Route path="/" element={<DashboardPage />} />
-              <Route path="/clientes" element={<ClientesPage />} />
-              <Route path="/produtos" element={<ProdutosPage />} />
-              <Route path="/ordens" element={<OrdensListPage />} />
-              <Route path="/ordens/nova" element={<NovaOrdemPage />} />
-              <Route path="/ordens/:id" element={<OrdemDetailPage />} />
-              <Route path="/vendas" element={<VendasPage />} />
-              <Route path="/relatorios" element={<RelatoriosPage />} />
-              <Route path="/configuracoes" element={<ConfiguracoesPage />} />
-              <Route path="*" element={<NotFound />} />
+              {/* Se não houver sessão, qualquer URL cai no Login */}
+              <Route path="*" element={<LoginPage onLogin={() => {}} />} />
             </Routes>
-          </AppLayout>
+          ) : (
+            <AppLayout>
+              <Routes>
+                <Route path="/" element={<DashboardPage />} />
+                <Route path="/clientes" element={<ClientesPage />} />
+                <Route path="/produtos" element={<ProdutosPage />} />
+                <Route path="/ordens" element={<OrdensListPage />} />
+                <Route path="/ordens/nova" element={<NovaOrdemPage />} />
+                <Route path="/ordens/:id" element={<OrdemDetailPage />} />
+                <Route path="/vendas" element={<VendasPage />} />
+                <Route path="/relatorios" element={<RelatoriosPage />} />
+                <Route path="/configuracoes" element={<ConfiguracoesPage />} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </AppLayout>
+          )}
         </BrowserRouter>
       </TooltipProvider>
     </QueryClientProvider>

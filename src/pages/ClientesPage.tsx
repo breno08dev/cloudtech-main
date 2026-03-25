@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Search, Pencil, Trash2, Loader2 } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, Loader2, Users, UserCircle } from "lucide-react";
 import { toast } from "sonner";
 
 interface Cliente {
@@ -26,7 +26,6 @@ interface Cliente {
   created_at: string;
 }
 
-// 1. Definição do Schema de Validação
 const clienteSchema = z.object({
   nome: z.string().min(2, "O nome do cliente é obrigatório"),
   telefone: z.string().optional(),
@@ -53,14 +52,12 @@ export default function ClientesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
 
-  // 2. React Hook Form
   const { register, handleSubmit, control, reset, formState: { errors } } = useForm<ClienteFormValues>({
     resolver: zodResolver(clienteSchema),
     defaultValues,
   });
 
-  // 3. Pesquisa e Listagem (Server-side Filtering)
-  const { data: clientes = [], isLoading, isError } = useQuery({
+  const { data: clientes = [], isLoading, isError, isFetching } = useQuery({
     queryKey: ["clientes", search],
     queryFn: async () => {
       let query = supabase.from("clientes").select("*").order("created_at", { ascending: false });
@@ -75,10 +72,8 @@ export default function ClientesPage() {
     },
   });
 
-  // 4. Mutations de Escrita
   const saveMutation = useMutation({
     mutationFn: async (payload: ClienteFormValues) => {
-      // Mapeamento explícito para satisfazer o Supabase e limpar campos vazios
       const dbPayload = {
         nome: payload.nome,
         telefone: payload.telefone || null,
@@ -101,9 +96,7 @@ export default function ClientesPage() {
       setDialogOpen(false);
       reset(defaultValues);
       setEditId(null);
-      // Invalida a cache para recarregar a lista automaticamente
       queryClient.invalidateQueries({ queryKey: ["clientes"] });
-      // Invalida também a lista de clientes que aparece no ecrã de "Nova Ordem"
       queryClient.invalidateQueries({ queryKey: ["clientes_select"] }); 
     },
     onError: () => toast.error("Ocorreu um erro ao guardar o cliente."),
@@ -122,7 +115,6 @@ export default function ClientesPage() {
     onError: () => toast.error("Não é possível excluir um cliente com Ordens de Serviço vinculadas."),
   });
 
-  // Ações de Interface
   function onSubmit(data: ClienteFormValues) {
     saveMutation.mutate(data);
   }
@@ -149,56 +141,71 @@ export default function ClientesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Clientes</h1>
+    <div className="flex flex-col gap-6 pb-8 animate-in fade-in duration-500">
+      
+      {/* Cabeçalho Premium */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card/60 border border-border/40 p-6 rounded-[2rem] backdrop-blur-xl shadow-sm shrink-0">
+        <div>
+          <h1 className="text-3xl font-black tracking-tight text-foreground flex items-center gap-3">
+            <div className="bg-primary/10 p-2.5 rounded-2xl border border-primary/20">
+              <Users className="h-6 w-6 text-primary" />
+            </div>
+            Gestão de Clientes
+          </h1>
+          <p className="text-muted-foreground text-sm font-medium mt-1 ml-1">Administre a sua base de clientes finais e lojistas.</p>
+        </div>
         
         <Dialog open={dialogOpen} onOpenChange={handleCloseDialog}>
           <DialogTrigger asChild>
-            <Button><Plus className="h-4 w-4 mr-2" />Novo Cliente</Button>
+            <Button className="rounded-2xl shadow-xl shadow-primary/20 bg-primary hover:bg-primary/90 hover:-translate-y-0.5 transition-all font-bold h-12 px-6 text-base">
+              <Plus className="mr-2 h-5 w-5" /> Novo Cliente
+            </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader>
-              <DialogTitle>{editId ? "Editar Cliente" : "Novo Cliente"}</DialogTitle>
-            </DialogHeader>
+          
+          <DialogContent className="sm:max-w-lg rounded-[2rem] border-border/40 shadow-2xl p-0 overflow-hidden">
+            <div className="bg-muted/30 p-6 pb-4 border-b border-border/40">
+              <DialogTitle className="text-2xl font-black flex items-center gap-2">
+                <UserCircle className="h-6 w-6 text-primary" />
+                {editId ? "Editar Cliente" : "Novo Cliente"}
+              </DialogTitle>
+            </div>
             
-            <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label>Nome *</Label>
-                <Input {...register("nome")} className={errors.nome ? "border-red-500" : ""} />
-                {errors.nome && <p className="text-sm text-red-500">{errors.nome.message}</p>}
+            <form onSubmit={handleSubmit(onSubmit)} className="grid gap-5 p-6 pt-4 bg-background">
+              <div className="grid gap-1.5">
+                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Nome Completo / Empresa *</Label>
+                <Input {...register("nome")} className={`h-12 rounded-xl bg-card border-border/60 focus-visible:ring-primary shadow-sm ${errors.nome ? "border-red-500 focus-visible:ring-red-500" : ""}`} />
+                {errors.nome && <p className="text-xs text-red-500 font-bold ml-1">{errors.nome.message}</p>}
               </div>
               
               <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>Telefone</Label>
-                  <Input {...register("telefone")} />
+                <div className="grid gap-1.5">
+                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Telefone</Label>
+                  <Input {...register("telefone")} className="h-12 rounded-xl bg-card border-border/60 focus-visible:ring-primary shadow-sm" placeholder="(00) 0000-0000" />
                 </div>
-                <div className="grid gap-2">
-                  <Label>WhatsApp</Label>
-                  <Input {...register("whatsapp")} />
+                <div className="grid gap-1.5">
+                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">WhatsApp</Label>
+                  <Input {...register("whatsapp")} className="h-12 rounded-xl bg-card border-border/60 focus-visible:ring-primary shadow-sm" placeholder="(00) 90000-0000" />
                 </div>
               </div>
               
               <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>CPF / CNPJ</Label>
-                  <Input {...register("cpf_cnpj")} />
+                <div className="grid gap-1.5">
+                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">CPF / CNPJ</Label>
+                  <Input {...register("cpf_cnpj")} className="h-12 rounded-xl bg-card border-border/60 focus-visible:ring-primary shadow-sm font-mono" />
                 </div>
-                <div className="grid gap-2">
-                  <Label>Tipo</Label>
-                  {/* Para usar o Select do Shadcn com o React Hook Form, precisamos do Controller */}
+                <div className="grid gap-1.5">
+                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Categoria de Cliente</Label>
                   <Controller
                     control={control}
                     name="tipo_cliente"
                     render={({ field }) => (
                       <Select value={field.value} onValueChange={field.onChange}>
-                        <SelectTrigger>
+                        <SelectTrigger className="h-12 rounded-xl bg-card border-border/60 focus:ring-primary shadow-sm font-bold">
                           <SelectValue />
                         </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="cliente">Cliente Final</SelectItem>
-                          <SelectItem value="lojista">Lojista</SelectItem>
+                        <SelectContent className="rounded-2xl border-border/50 shadow-xl">
+                          <SelectItem value="cliente" className="py-3 font-medium cursor-pointer">Cliente Final</SelectItem>
+                          <SelectItem value="lojista" className="py-3 font-bold text-primary cursor-pointer">Lojista (Preço Especial)</SelectItem>
                         </SelectContent>
                       </Select>
                     )}
@@ -206,90 +213,112 @@ export default function ClientesPage() {
                 </div>
               </div>
               
-              <div className="grid gap-2">
-                <Label>Observações</Label>
-                <Textarea {...register("observacoes")} />
+              <div className="grid gap-1.5">
+                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Observações / Endereço</Label>
+                <Textarea {...register("observacoes")} className="min-h-[80px] resize-none rounded-xl bg-card border-border/60 focus-visible:ring-primary shadow-sm" />
               </div>
               
-              <Button type="submit" disabled={saveMutation.isPending} className="mt-2">
-                {saveMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-                {saveMutation.isPending ? "A guardar..." : "Salvar"}
-              </Button>
+              <div className="pt-2 border-t border-border/40 mt-2 flex justify-end gap-3">
+                <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)} className="rounded-xl font-bold">Cancelar</Button>
+                <Button type="submit" disabled={saveMutation.isPending} className="rounded-xl bg-primary hover:bg-primary/90 font-bold px-8 shadow-md">
+                  {saveMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                  {saveMutation.isPending ? "A guardar..." : "Salvar Registo"}
+                </Button>
+              </div>
             </form>
           </DialogContent>
         </Dialog>
       </div>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      {/* Barra de Pesquisa */}
+      <div className="relative w-full max-w-md group">
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground/70 group-focus-within:text-primary transition-colors" />
         <Input 
           placeholder="Buscar por nome, telefone ou CPF..." 
-          className="pl-9" 
+          className="pl-12 h-14 text-base rounded-2xl bg-card/60 border-border/50 focus-visible:ring-primary backdrop-blur-md transition-all shadow-sm w-full font-medium" 
           value={search} 
           onChange={(e) => setSearch(e.target.value)} 
         />
       </div>
 
-      <Card>
+      {/* Tabela de Dados (Premium) */}
+      <Card className="rounded-[2rem] border-border/40 shadow-xl shadow-black/5 bg-card/60 backdrop-blur-xl overflow-hidden flex flex-col relative">
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nome</TableHead>
-                <TableHead>Telefone</TableHead>
-                <TableHead>CPF/CNPJ</TableHead>
-                <TableHead>Tipo</TableHead>
-                <TableHead className="w-24">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading && (
-                <TableRow>
-                  <TableCell colSpan={5} className="h-24 text-center">
-                    <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
-                  </TableCell>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader className="bg-background/80 hover:bg-background/80 border-b border-border/40">
+                <TableRow className="hover:bg-transparent border-none">
+                  <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black py-5 pl-6">Nome do Cliente</TableHead>
+                  <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black">Contato</TableHead>
+                  <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black">CPF / CNPJ</TableHead>
+                  <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black">Tipo</TableHead>
+                  <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black text-right pr-6">Ações</TableHead>
                 </TableRow>
-              )}
-              {isError && (
-                <TableRow>
-                  <TableCell colSpan={5} className="h-24 text-center text-red-500">
-                    Erro ao carregar os clientes.
-                  </TableCell>
-                </TableRow>
-              )}
-              {!isLoading && !isError && clientes.length === 0 && (
-                <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Nenhum cliente encontrado</TableCell></TableRow>
-              )}
-              
-              {!isLoading && !isError && clientes.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell className="font-medium">{c.nome}</TableCell>
-                  <TableCell className="font-mono text-sm">{c.telefone || "—"}</TableCell>
-                  <TableCell className="font-mono text-sm">{c.cpf_cnpj || "—"}</TableCell>
-                  <TableCell>
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${c.tipo_cliente === "lojista" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
-                      {c.tipo_cliente === "lojista" ? "Lojista" : "Cliente"}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => handleEdit(c)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        onClick={() => window.confirm("Excluir este cliente?") && deleteMutation.mutate(c.id)}
-                        disabled={deleteMutation.isPending}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-64 text-center">
+                      <div className="flex flex-col items-center justify-center gap-3">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        <span className="text-sm font-bold text-muted-foreground">A carregar clientes...</span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : isError ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-64 text-center text-destructive font-bold bg-destructive/5">
+                      Erro ao carregar os clientes.
+                    </TableCell>
+                  </TableRow>
+                ) : clientes.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center py-16">
+                      <div className="flex flex-col items-center gap-2">
+                        <Users className="h-10 w-10 opacity-20 mb-2" />
+                        <span className="font-bold text-lg text-muted-foreground">Nenhum cliente encontrado.</span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  clientes.map((c) => (
+                    <TableRow key={c.id} className={`hover:bg-background/80 transition-all duration-200 border-border/30 group ${isFetching ? 'opacity-60' : ''}`}>
+                      <TableCell className="font-bold text-sm text-foreground/90 pl-6 py-4">{c.nome}</TableCell>
+                      <TableCell className="font-mono text-sm text-muted-foreground font-medium">
+                        {c.telefone || c.whatsapp || "—"}
+                      </TableCell>
+                      <TableCell className="font-mono text-sm text-muted-foreground font-medium">{c.cpf_cnpj || "—"}</TableCell>
+                      <TableCell>
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wider border shadow-sm ${
+                          c.tipo_cliente === "lojista" 
+                          ? "bg-primary/10 text-primary border-primary/20" 
+                          : "bg-slate-500/10 text-slate-600 dark:text-slate-300 border-slate-500/20"
+                        }`}>
+                          {c.tipo_cliente === "lojista" ? "Lojista" : "Cliente"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="pr-6 text-right">
+                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button variant="ghost" size="icon" onClick={() => handleEdit(c)} className="h-9 w-9 rounded-xl hover:bg-primary/10 hover:text-primary">
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            onClick={() => window.confirm("Tem certeza que deseja excluir este cliente?") && deleteMutation.mutate(c.id)}
+                            disabled={deleteMutation.isPending}
+                            className="h-9 w-9 rounded-xl hover:bg-destructive/10 hover:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </div>

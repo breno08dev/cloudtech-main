@@ -10,7 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Plus, Search, Pencil, Trash2, AlertTriangle, Loader2 } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, AlertTriangle, Loader2, Package } from "lucide-react";
 import { toast } from "sonner";
 
 interface Produto {
@@ -27,7 +27,6 @@ interface Produto {
   created_at: string;
 }
 
-// 1. Definição do Schema de Validação
 const produtoSchema = z.object({
   nome: z.string().min(2, "O nome do produto é obrigatório"),
   categoria: z.string().optional(),
@@ -53,14 +52,12 @@ export default function ProdutosPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
 
-  // 2. React Hook Form
   const { register, handleSubmit, reset, formState: { errors } } = useForm<ProdutoFormValues>({
     resolver: zodResolver(produtoSchema),
     defaultValues,
   });
 
-  // 3. Pesquisa e Listagem com React Query (Filtragem no Servidor)
-  const { data: produtos = [], isLoading, isError } = useQuery({
+  const { data: produtos = [], isLoading, isError, isFetching } = useQuery({
     queryKey: ["produtos", search],
     queryFn: async () => {
       let query = supabase.from("produtos").select("*").order("nome");
@@ -75,13 +72,10 @@ export default function ProdutosPage() {
     },
   });
 
-  // 4. Mutations de Escrita
   const saveMutation = useMutation({
     mutationFn: async (payload: ProdutoFormValues) => {
-      // Mapeamos explicitamente para satisfazer o TypeScript do Supabase
-      // e garantimos que valores opcionais vazios vão como nulos (null)
       const dbPayload = {
-        nome: payload.nome, // Garantimos que o nome é uma string válida
+        nome: payload.nome,
         categoria: payload.categoria || null,
         marca: payload.marca || null,
         modelo_compativel: payload.modelo_compativel || null,
@@ -123,7 +117,6 @@ export default function ProdutosPage() {
     onError: () => toast.error("Não é possível excluir um produto que já está vinculado a uma OS."),
   });
 
-  // Ações de Interface
   function onSubmit(data: ProdutoFormValues) {
     saveMutation.mutate(data);
   }
@@ -153,154 +146,208 @@ export default function ProdutosPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Produtos / Estoque</h1>
+    <div className="flex flex-col gap-6 pb-8 animate-in fade-in duration-500">
+      
+      {/* Cabeçalho Premium */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card/60 border border-border/40 p-6 rounded-[2rem] backdrop-blur-xl shadow-sm shrink-0">
+        <div>
+          <h1 className="text-3xl font-black tracking-tight text-foreground flex items-center gap-3">
+            <div className="bg-primary/10 p-2.5 rounded-2xl border border-primary/20">
+              <Package className="h-6 w-6 text-primary" />
+            </div>
+            Produtos e Estoque
+          </h1>
+          <p className="text-muted-foreground text-sm font-medium mt-1 ml-1">Gerencie peças, acessórios e acompanhe a disponibilidade.</p>
+        </div>
         
         <Dialog open={dialogOpen} onOpenChange={handleCloseDialog}>
           <DialogTrigger asChild>
-            <Button><Plus className="h-4 w-4 mr-2" />Novo Produto</Button>
+            <Button className="rounded-2xl shadow-xl shadow-primary/20 bg-primary hover:bg-primary/90 hover:-translate-y-0.5 transition-all font-bold h-12 px-6 text-base">
+              <Plus className="mr-2 h-5 w-5" /> Novo Produto
+            </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{editId ? "Editar Produto" : "Novo Produto"}</DialogTitle>
-            </DialogHeader>
+          
+          <DialogContent className="sm:max-w-xl rounded-[2rem] border-border/40 shadow-2xl p-0 overflow-hidden max-h-[90vh]">
+            <div className="bg-muted/30 p-6 pb-4 border-b border-border/40">
+              <DialogTitle className="text-2xl font-black flex items-center gap-2">
+                <Package className="h-6 w-6 text-primary" />
+                {editId ? "Editar Produto" : "Novo Produto"}
+              </DialogTitle>
+            </div>
             
-            <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label>Nome *</Label>
-                <Input {...register("nome")} className={errors.nome ? "border-red-500" : ""} />
-                {errors.nome && <p className="text-sm text-red-500">{errors.nome.message}</p>}
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>Categoria</Label>
-                  <Input {...register("categoria")} />
+            <div className="overflow-y-auto p-6 bg-background max-h-[calc(90vh-140px)]">
+              <form onSubmit={handleSubmit(onSubmit)} className="grid gap-6">
+                
+                {/* Nome */}
+                <div className="grid gap-1.5">
+                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Nome do Produto *</Label>
+                  <Input {...register("nome")} className={`h-12 rounded-xl bg-card border-border/60 focus-visible:ring-primary shadow-sm ${errors.nome ? "border-red-500 focus-visible:ring-red-500" : ""}`} placeholder="Ex: Tela iPhone 11 Original" />
+                  {errors.nome && <p className="text-xs text-red-500 font-bold ml-1">{errors.nome.message}</p>}
                 </div>
-                <div className="grid gap-2">
-                  <Label>Marca</Label>
-                  <Input {...register("marca")} />
+                
+                {/* Categoria e Marca */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Categoria</Label>
+                    <Input {...register("categoria")} className="h-12 rounded-xl bg-card border-border/60 focus-visible:ring-primary shadow-sm" placeholder="Ex: Peças, Acessórios..." />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Marca</Label>
+                    <Input {...register("marca")} className="h-12 rounded-xl bg-card border-border/60 focus-visible:ring-primary shadow-sm" placeholder="Ex: Apple, Samsung..." />
+                  </div>
                 </div>
-              </div>
-              
-              <div className="grid gap-2">
-                <Label>Modelo Compatível</Label>
-                <Input {...register("modelo_compativel")} />
-              </div>
-              
-              <div className="grid grid-cols-3 gap-4">
-                <div className="grid gap-2">
-                  <Label>Preço Custo</Label>
-                  <Input type="number" step="0.01" {...register("preco_custo")} />
+                
+                {/* Modelo */}
+                <div className="grid gap-1.5">
+                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Modelos Compatíveis</Label>
+                  <Input {...register("modelo_compativel")} className="h-12 rounded-xl bg-card border-border/60 focus-visible:ring-primary shadow-sm" placeholder="Ex: iPhone 11, iPhone XR..." />
                 </div>
-                <div className="grid gap-2">
-                  <Label>Preço Venda</Label>
-                  <Input type="number" step="0.01" {...register("preco_venda")} />
+                
+                {/* Preços */}
+                <div className="grid grid-cols-3 gap-4 bg-muted/20 p-4 rounded-2xl border border-border/40">
+                  <div className="grid gap-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Custo (R$)</Label>
+                    <Input type="number" step="0.01" {...register("preco_custo")} className="h-11 rounded-xl bg-background border-border/60 focus-visible:ring-primary font-mono text-sm" />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-widest text-primary ml-1">Venda (R$)</Label>
+                    <Input type="number" step="0.01" {...register("preco_venda")} className="h-11 rounded-xl bg-background border-primary/30 focus-visible:ring-primary font-mono font-bold text-primary shadow-sm" />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Lojista (R$)</Label>
+                    <Input type="number" step="0.01" {...register("preco_lojista")} className="h-11 rounded-xl bg-background border-border/60 focus-visible:ring-primary font-mono text-sm" />
+                  </div>
                 </div>
-                <div className="grid gap-2">
-                  <Label>Preço Lojista</Label>
-                  <Input type="number" step="0.01" {...register("preco_lojista")} />
+                
+                {/* Estoque */}
+                <div className="grid grid-cols-2 gap-5">
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Quantidade em Estoque</Label>
+                    <Input type="number" {...register("estoque")} className="h-12 rounded-xl bg-card border-border/60 focus-visible:ring-primary shadow-sm font-mono font-bold text-lg" />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Alerta: Estoque Mínimo</Label>
+                    <Input type="number" {...register("estoque_minimo")} className="h-12 rounded-xl bg-card border-border/60 focus-visible:ring-primary shadow-sm font-mono text-muted-foreground" />
+                  </div>
                 </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>Estoque</Label>
-                  <Input type="number" {...register("estoque")} />
+                
+                <div className="pt-4 border-t border-border/40 flex justify-end gap-3">
+                  <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)} className="rounded-xl font-bold">Cancelar</Button>
+                  <Button type="submit" disabled={saveMutation.isPending} className="rounded-xl bg-primary hover:bg-primary/90 font-bold px-8 shadow-md">
+                    {saveMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                    {saveMutation.isPending ? "A guardar..." : "Salvar Produto"}
+                  </Button>
                 </div>
-                <div className="grid gap-2">
-                  <Label>Estoque Mínimo</Label>
-                  <Input type="number" {...register("estoque_minimo")} />
-                </div>
-              </div>
-              
-              <Button type="submit" disabled={saveMutation.isPending} className="mt-2">
-                {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                {saveMutation.isPending ? "A guardar..." : "Salvar"}
-              </Button>
-            </form>
+              </form>
+            </div>
           </DialogContent>
         </Dialog>
       </div>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      {/* Barra de Pesquisa */}
+      <div className="relative w-full max-w-md group">
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground/70 group-focus-within:text-primary transition-colors" />
         <Input 
-          placeholder="Buscar produto, marca ou modelo..." 
-          className="pl-9" 
+          placeholder="Buscar produto, categoria ou modelo..." 
+          className="pl-12 h-14 text-base rounded-2xl bg-card/60 border-border/50 focus-visible:ring-primary backdrop-blur-md transition-all shadow-sm w-full font-medium" 
           value={search} 
           onChange={(e) => setSearch(e.target.value)} 
         />
       </div>
 
-      <Card>
+      {/* Tabela de Dados (Premium) */}
+      <Card className="rounded-[2rem] border-border/40 shadow-xl shadow-black/5 bg-card/60 backdrop-blur-xl overflow-hidden flex flex-col relative">
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nome</TableHead>
-                <TableHead>Categoria</TableHead>
-                <TableHead>Marca</TableHead>
-                <TableHead className="text-right">Custo</TableHead>
-                <TableHead className="text-right">Venda</TableHead>
-                <TableHead className="text-right">Lojista</TableHead>
-                <TableHead className="text-center">Estoque</TableHead>
-                <TableHead className="w-24">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading && (
-                <TableRow>
-                  <TableCell colSpan={8} className="h-24 text-center">
-                    <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
-                  </TableCell>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader className="bg-background/80 hover:bg-background/80 border-b border-border/40">
+                <TableRow className="hover:bg-transparent border-none">
+                  <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black py-5 pl-6">Produto</TableHead>
+                  <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black">Detalhes</TableHead>
+                  <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black text-right">Custo</TableHead>
+                  <TableHead className="text-[11px] uppercase tracking-widest text-primary font-black text-right">Venda</TableHead>
+                  <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black text-right">Lojista</TableHead>
+                  <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black text-center">Estoque</TableHead>
+                  <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black text-right pr-6">Ações</TableHead>
                 </TableRow>
-              )}
-              {isError && (
-                <TableRow>
-                  <TableCell colSpan={8} className="h-24 text-center text-red-500">
-                    Erro ao carregar o stock de produtos.
-                  </TableCell>
-                </TableRow>
-              )}
-              {!isLoading && !isError && produtos.length === 0 && (
-                <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">Nenhum produto encontrado</TableCell></TableRow>
-              )}
-              
-              {!isLoading && !isError && produtos.map((p) => (
-                <TableRow key={p.id}>
-                  <TableCell className="font-medium">{p.nome}</TableCell>
-                  <TableCell className="text-muted-foreground">{p.categoria || "—"}</TableCell>
-                  <TableCell>{p.marca || "—"}</TableCell>
-                  <TableCell className="text-right font-mono text-sm">R$ {Number(p.preco_custo).toFixed(2)}</TableCell>
-                  <TableCell className="text-right font-mono text-sm">R$ {Number(p.preco_venda).toFixed(2)}</TableCell>
-                  <TableCell className="text-right font-mono text-sm">R$ {Number(p.preco_lojista).toFixed(2)}</TableCell>
-                  <TableCell className="text-center">
-                    <span className={`inline-flex items-center gap-1 font-mono text-sm font-semibold ${p.estoque <= p.estoque_minimo ? "text-destructive" : ""}`}>
-                      {p.estoque <= p.estoque_minimo && <AlertTriangle className="h-3 w-3" />}
-                      {p.estoque}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => handleEdit(p)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        onClick={() => window.confirm("Excluir este produto?") && deleteMutation.mutate(p.id)}
-                        disabled={deleteMutation.isPending}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="h-64 text-center">
+                      <div className="flex flex-col items-center justify-center gap-3">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        <span className="text-sm font-bold text-muted-foreground">A carregar inventário...</span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : isError ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="h-64 text-center text-destructive font-bold bg-destructive/5">
+                      Erro ao carregar o stock de produtos.
+                    </TableCell>
+                  </TableRow>
+                ) : produtos.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-16">
+                      <div className="flex flex-col items-center gap-2">
+                        <Package className="h-10 w-10 opacity-20 mb-2" />
+                        <span className="font-bold text-lg text-muted-foreground">Nenhum produto encontrado.</span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  produtos.map((p) => {
+                    const baixoEstoque = p.estoque <= p.estoque_minimo;
+                    
+                    return (
+                      <TableRow key={p.id} className={`hover:bg-background/80 transition-all duration-200 border-border/30 group ${isFetching ? 'opacity-60' : ''}`}>
+                        <TableCell className="font-bold text-sm text-foreground/90 pl-6 py-4">{p.nome}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-col text-xs">
+                            {p.categoria && <span className="font-medium text-muted-foreground">{p.categoria}</span>}
+                            {p.marca && <span className="text-muted-foreground/70">{p.marca}</span>}
+                            {!p.categoria && !p.marca && <span className="text-muted-foreground/50">—</span>}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs font-medium text-muted-foreground/80">R$ {Number(p.preco_custo).toFixed(2)}</TableCell>
+                        <TableCell className="text-right font-mono text-sm font-black text-primary">R$ {Number(p.preco_venda).toFixed(2)}</TableCell>
+                        <TableCell className="text-right font-mono text-xs font-medium text-muted-foreground/80">R$ {Number(p.preco_lojista).toFixed(2)}</TableCell>
+                        <TableCell className="text-center">
+                          {baixoEstoque ? (
+                            <span title="Estoque abaixo do mínimo recomendado" className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-500/10 text-red-500 border border-red-500/20 font-mono text-sm font-black animate-pulse">
+                              <AlertTriangle className="h-3.5 w-3.5" />
+                              {p.estoque}
+                            </span>
+                          ) : (
+                            <span className="font-mono text-sm font-bold text-foreground/80 bg-muted/50 px-3 py-1 rounded-md border border-border/40">
+                              {p.estoque}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="pr-6 text-right">
+                          <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button variant="ghost" size="icon" onClick={() => handleEdit(p)} className="h-9 w-9 rounded-xl hover:bg-primary/10 hover:text-primary">
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={() => window.confirm("Excluir este produto?") && deleteMutation.mutate(p.id)}
+                              disabled={deleteMutation.isPending}
+                              className="h-9 w-9 rounded-xl hover:bg-destructive/10 hover:text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { Store, Phone, MapPin, ShieldCheck, Loader2, Save, Settings } from "lucide-react";
+import { Store, Phone, MapPin, ShieldCheck, Loader2, Save, Settings, Building2 } from "lucide-react";
 
 // 1. Schema de Validação
 const configSchema = z.object({
@@ -43,7 +43,6 @@ export default function ConfiguracoesPage() {
   const { data: configData, isLoading } = useQuery({
     queryKey: ["configuracoes"],
     queryFn: async () => {
-      // Tenta buscar a primeira linha da tabela de configurações
       const { data, error } = await supabase.from("configuracoes").select("*").limit(1).maybeSingle();
       if (error) throw error;
       return data;
@@ -75,11 +74,9 @@ export default function ConfiguracoesPage() {
       };
 
       if (configData?.id) {
-        // Já existe uma configuração, vamos atualizar
         const { error } = await supabase.from("configuracoes").update(dbPayload).eq("id", configData.id);
         if (error) throw error;
       } else {
-        // Primeira vez configurando, vamos inserir
         const { error } = await supabase.from("configuracoes").insert([dbPayload]);
         if (error) throw error;
       }
@@ -99,28 +96,29 @@ export default function ConfiguracoesPage() {
 
   if (isLoading) {
     return (
-      <div className="flex h-[80vh] items-center justify-center">
-        <Loader2 className="h-10 w-10 animate-spin text-primary/60" />
+      <div className="flex h-[80vh] flex-col items-center justify-center gap-4">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+        <p className="text-sm font-bold text-muted-foreground animate-pulse">A carregar preferências...</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 pb-12">
-      {/* Header da Página */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card p-6 rounded-3xl border border-border/50 shadow-sm">
+    <div className="max-w-4xl mx-auto space-y-8 pb-12 animate-in fade-in duration-500">
+      
+      {/* Header Premium da Página */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card/60 border border-border/40 p-6 rounded-[2rem] backdrop-blur-xl shadow-sm shrink-0">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-3">
-            <div className="bg-primary/10 p-3 rounded-2xl">
-              <Settings className="h-7 w-7 text-primary" />
+          <h1 className="text-3xl font-black tracking-tight text-foreground flex items-center gap-3">
+            <div className="bg-primary/10 p-2.5 rounded-2xl border border-primary/20">
+              <Settings className="h-6 w-6 text-primary" />
             </div>
-            Configurações do Sistema
+            Configurações
           </h1>
-          <p className="text-muted-foreground mt-2 ml-1">Personalize os dados da sua assistência e os termos padrão de impressão.</p>
+          <p className="text-muted-foreground text-sm font-medium mt-1 ml-1">Personalize os dados da sua assistência e os termos padrão de impressão.</p>
         </div>
         <Button 
-          size="lg" 
-          className="rounded-xl font-bold shadow-md hover:shadow-lg transition-all"
+          className="rounded-2xl shadow-xl shadow-primary/20 bg-primary hover:bg-primary/90 hover:-translate-y-0.5 transition-all font-bold h-12 px-6 text-base"
           disabled={saveMutation.isPending}
           onClick={handleSubmit(onSubmit)}
         >
@@ -132,44 +130,44 @@ export default function ConfiguracoesPage() {
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
         
         {/* Bloco 1: Dados da Empresa */}
-        <Card className="rounded-3xl border-border/50 shadow-sm overflow-hidden">
-          <CardHeader className="bg-muted/30 border-b border-border/40 pb-4">
-            <CardTitle className="text-xl flex items-center gap-2">
-              <Store className="h-5 w-5 text-primary" /> Dados da Assistência Técnica
+        <Card className="rounded-[2rem] border-border/40 shadow-xl shadow-black/5 bg-card/60 backdrop-blur-xl overflow-hidden">
+          <CardHeader className="bg-background/80 border-b border-border/40 p-6">
+            <CardTitle className="text-xl font-black flex items-center gap-2 text-foreground/90 uppercase tracking-widest">
+              <Building2 className="h-5 w-5 text-primary" /> Dados da Assistência
             </CardTitle>
-            <CardDescription>Essas informações aparecerão no cabeçalho das Ordens de Serviço.</CardDescription>
+            <CardDescription className="font-medium">Essas informações aparecerão no cabeçalho das suas Ordens de Serviço.</CardDescription>
           </CardHeader>
-          <CardContent className="p-6 space-y-6">
+          <CardContent className="p-8 space-y-6 bg-background/30">
             
             <div className="grid gap-2">
-              <Label className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Nome da Empresa / Loja *</Label>
+              <Label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Nome da Empresa / Loja *</Label>
               <Input 
                 {...register("nome_empresa")} 
-                className={`h-12 text-lg font-medium rounded-xl bg-muted/10 ${errors.nome_empresa ? "border-red-500 focus-visible:ring-red-500" : ""}`} 
+                className={`h-14 text-lg font-bold rounded-2xl bg-card/80 border-border/60 shadow-sm focus-visible:ring-primary transition-all ${errors.nome_empresa ? "border-red-500 focus-visible:ring-red-500" : ""}`} 
                 placeholder="Ex: Cloud Tech" 
               />
-              {errors.nome_empresa && <span className="text-sm text-red-500">{errors.nome_empresa.message}</span>}
+              {errors.nome_empresa && <span className="text-xs font-bold text-red-500 ml-1">{errors.nome_empresa.message}</span>}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="grid gap-2">
-                <Label className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                  <Phone className="h-4 w-4" /> Telefones
+                <Label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2 ml-1">
+                  <Phone className="h-3.5 w-3.5" /> Telefones
                 </Label>
                 <Input 
                   {...register("telefone")} 
-                  className="h-12 rounded-xl bg-muted/10" 
+                  className="h-12 rounded-xl bg-card/80 border-border/60 shadow-sm focus-visible:ring-primary transition-all font-medium text-base" 
                   placeholder="Ex: (16) 98874-1282" 
                 />
               </div>
               <div className="grid gap-2">
-                <Label className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                  <MapPin className="h-4 w-4" /> Endereço Completo
+                <Label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2 ml-1">
+                  <MapPin className="h-3.5 w-3.5" /> Endereço Completo
                 </Label>
                 <Input 
                   {...register("endereco")} 
-                  className="h-12 rounded-xl bg-muted/10" 
-                  placeholder="Ex: Avenida Cristo Redentor 573 - Posto Iguatemi" 
+                  className="h-12 rounded-xl bg-card/80 border-border/60 shadow-sm focus-visible:ring-primary transition-all font-medium text-base" 
+                  placeholder="Ex: Avenida Cristo Redentor 573" 
                 />
               </div>
             </div>
@@ -178,34 +176,35 @@ export default function ConfiguracoesPage() {
         </Card>
 
         {/* Bloco 2: Padrões do Sistema */}
-        <Card className="rounded-3xl border-border/50 shadow-sm overflow-hidden">
-          <CardHeader className="bg-muted/30 border-b border-border/40 pb-4">
-            <CardTitle className="text-xl flex items-center gap-2">
+        <Card className="rounded-[2rem] border-border/40 shadow-xl shadow-black/5 bg-card/60 backdrop-blur-xl overflow-hidden">
+          <CardHeader className="bg-background/80 border-b border-border/40 p-6">
+            <CardTitle className="text-xl font-black flex items-center gap-2 text-foreground/90 uppercase tracking-widest">
               <ShieldCheck className="h-5 w-5 text-amber-500" /> Padrões de Termos e Garantia
             </CardTitle>
-            <CardDescription>Defina os textos pré-preenchidos ao criar novas OS.</CardDescription>
+            <CardDescription className="font-medium">Defina os textos pré-preenchidos ao criar novas OS.</CardDescription>
           </CardHeader>
-          <CardContent className="p-6 space-y-6">
+          <CardContent className="p-8 space-y-8 bg-background/30">
             
-            <div className="grid gap-2">
-              <Label className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Prazo de Garantia Padrão</Label>
+            <div className="grid gap-2 max-w-md">
+              <Label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Prazo de Garantia Padrão</Label>
               <Input 
                 {...register("garantia_padrao")} 
-                className="h-12 rounded-xl bg-muted/10 max-w-sm font-medium" 
+                className="h-12 rounded-xl bg-card/80 border-border/60 shadow-sm focus-visible:ring-primary transition-all font-bold text-base" 
                 placeholder="Ex: 90 dias" 
               />
-              <p className="text-xs text-muted-foreground">Este prazo será sugerido automaticamente ao abrir uma nova OS.</p>
+              <p className="text-[11px] font-semibold text-muted-foreground/70 ml-1">Este prazo será sugerido automaticamente ao abrir uma nova OS.</p>
             </div>
 
-            <Separator />
+            <Separator className="opacity-50" />
 
             <div className="grid gap-2">
-              <Label className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Mensagem Personalizada no Recibo (Opcional)</Label>
+              <Label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Mensagem Personalizada no Recibo (Opcional)</Label>
               <Textarea 
                 {...register("mensagem_padrao_os")} 
-                className="min-h-[100px] rounded-xl bg-muted/10" 
+                className="min-h-[120px] rounded-2xl bg-card/80 border-border/60 shadow-sm focus-visible:ring-primary transition-all font-medium text-base resize-none" 
                 placeholder="Ex: Aparelhos não retirados em 90 dias serão vendidos para custear o serviço..." 
               />
+              <p className="text-[11px] font-semibold text-muted-foreground/70 ml-1">Mensagem impressa no rodapé da folha da Ordem de Serviço.</p>
             </div>
 
           </CardContent>
