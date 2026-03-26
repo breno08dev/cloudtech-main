@@ -158,6 +158,7 @@ export default function VendasPage() {
   const removeFromCart = (produtoId: string) => setCart((prev) => prev.filter((item) => item.produto.id !== produtoId));
   const clearCart = () => { setCart([]); setClienteId("avulso"); setFormaPagamento("dinheiro"); };
 
+  // ================= NOVA LÓGICA DE IMPRESSÃO (Igual à OS) =================
   const imprimirCupom = () => {
     const nomeEmpresa = config?.nome_empresa || "MINHA EMPRESA";
     const endereco = config?.endereco || "";
@@ -204,14 +205,35 @@ export default function VendasPage() {
     `;
 
     const iframe = document.createElement('iframe');
-    iframe.style.position = 'absolute'; iframe.style.width = '0px'; iframe.style.height = '0px'; iframe.style.border = 'none';
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0px';
+    iframe.style.height = '0px';
+    iframe.style.border = 'none';
     document.body.appendChild(iframe);
+
     const doc = iframe.contentWindow?.document;
     if (doc) {
-      doc.open(); doc.write(htmlContent); doc.close();
-      setTimeout(() => { iframe.contentWindow?.focus(); iframe.contentWindow?.print(); setTimeout(() => { document.body.removeChild(iframe); }, 2000); }, 500);
+      doc.open(); 
+      doc.write(htmlContent); 
+      doc.close();
+
+      if (iframe.contentWindow) {
+        iframe.contentWindow.onafterprint = () => {
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+        };
+      }
+
+      setTimeout(() => { 
+        iframe.contentWindow?.focus(); 
+        iframe.contentWindow?.print(); 
+      }, 500);
     }
   };
+  // ================= FIM NOVA LÓGICA DE IMPRESSÃO =================
 
   const checkoutMutation = useMutation({
     mutationFn: async (shouldPrint: boolean) => {

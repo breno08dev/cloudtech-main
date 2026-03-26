@@ -1,0 +1,11 @@
+[build]
+  # Comando que o Netlify vai rodar para compilar o sistema
+  command = "npm run build"
+  # Pasta onde o Vite gera os ficheiros finais
+  publish = "dist"
+
+# Regra de Ouro para o React Router funcionar no Netlify
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
