@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Search, Pencil, Trash2, AlertTriangle, Loader2, Package, Barcode, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, AlertTriangle, Loader2, Package, Barcode, ChevronLeft, ChevronRight, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -47,6 +47,9 @@ export default function ProdutosPage() {
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  
+  // Estado para o modal de exclusão
+  const [itemToDelete, setItemToDelete] = useState<{ id: string, nome: string } | null>(null);
   
   // Estado para Paginação
   const [currentPage, setCurrentPage] = useState(1);
@@ -162,9 +165,10 @@ export default function ProdutosPage() {
     },
     onSuccess: () => {
       toast.success("Produto excluído com sucesso");
+      setItemToDelete(null); // Fecha o modal após o sucesso
       queryClient.invalidateQueries({ queryKey: ["produtos"] });
     },
-    onError: () => toast.error("Não é possível excluir um produto que já está vinculado."),
+    onError: () => toast.error("Não é possível excluir um produto que já está vinculado a uma OS ou venda."),
   });
 
   function onSubmit(data: ProdutoFormValues) {
@@ -343,7 +347,7 @@ export default function ProdutosPage() {
           value={search} 
           onChange={(e) => {
             setSearch(e.target.value);
-            setCurrentPage(1); // Volta para a página 1 ao pesquisar
+            setCurrentPage(1); 
           }} 
         />
       </div>
@@ -421,7 +425,15 @@ export default function ProdutosPage() {
                             <Button variant="ghost" size="icon" onClick={() => handleEdit(p)} className="h-9 w-9 rounded-xl hover:bg-primary/10 hover:text-primary">
                               <Pencil className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="icon" onClick={() => window.confirm("Atenção: Excluir este produto apagará todas as variações ligadas a ele. Continuar?") && deleteMutation.mutate(p.id)} disabled={deleteMutation.isPending} className="h-9 w-9 rounded-xl hover:bg-destructive/10 hover:text-destructive">
+                            
+                            {/* Botão de exclusão atualizado para abrir o Modal */}
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={() => setItemToDelete({ id: p.id, nome: p.nome })} 
+                              disabled={deleteMutation.isPending} 
+                              className="h-9 w-9 rounded-xl hover:bg-destructive/10 hover:text-destructive"
+                            >
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
@@ -451,9 +463,33 @@ export default function ProdutosPage() {
               </div>
             </div>
           )}
-
         </CardContent>
       </Card>
+
+      {/* Modal de Exclusão Padrão */}
+      <Dialog open={!!itemToDelete} onOpenChange={(open) => !open && setItemToDelete(null)}>
+        <DialogContent className="sm:max-w-sm rounded-[2rem] p-6 text-center border-red-500/20 shadow-2xl">
+          <div className="mx-auto bg-red-500/10 p-4 rounded-full w-fit mb-3">
+            <AlertCircle className="h-8 w-8 text-red-500" />
+          </div>
+          <DialogTitle className="text-2xl font-black mb-2 text-foreground">Excluir Produto</DialogTitle>
+          <p className="text-sm text-muted-foreground font-medium mb-6 px-2">
+            Tem certeza que deseja excluir <strong className="text-foreground">{itemToDelete?.nome}</strong>? Esta ação apagará também todas as variações ligadas a ele e não poderá ser desfeita.
+          </p>
+          
+          <Button 
+            onClick={() => { if(itemToDelete) deleteMutation.mutate(itemToDelete.id); }} 
+            disabled={deleteMutation.isPending} 
+            variant="destructive" 
+            className="w-full h-12 rounded-xl font-bold text-base shadow-lg shadow-red-500/20 hover:bg-red-600 transition-colors"
+          >
+            {deleteMutation.isPending ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <Trash2 className="h-5 w-5 mr-2" />}
+            Sim, Excluir Produto
+          </Button>
+          <Button variant="ghost" onClick={() => setItemToDelete(null)} className="w-full mt-2 font-bold rounded-xl h-11 hover:bg-muted/80">Cancelar</Button>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
