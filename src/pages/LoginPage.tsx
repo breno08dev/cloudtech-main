@@ -36,7 +36,7 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
       } else {
         toast.success("Login realizado com sucesso!");
         onLogin();
-        navigate("/");
+        navigate("/vendas");
       }
     } catch (error) {
       console.error("Erro no login:", error);

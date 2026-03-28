@@ -17,7 +17,7 @@ import OrdemDetailPage from "./pages/OrdemDetailPage";
 import VendasPage from "./pages/VendasPage";
 import RelatoriosPage from "./pages/RelatoriosPage";
 import ConfiguracoesPage from "./pages/ConfiguracoesPage";
-import FinanceiroPage from "./pages/FinanceiroPage"; // Import da nova página
+import FinanceiroPage from "./pages/FinanceiroPage"; 
 import NotFound from "./pages/NotFound";
 import PasswordGate from "./components/PasswordGate";
 
@@ -53,7 +53,14 @@ const App = () => {
           ) : (
             <AppLayout>
               <Routes>
-                <Route path="/" element={<DashboardPage />} />
+                
+                {/* Dashboard agora protegido com PasswordGate */}
+                <Route path="/" element={
+                  <PasswordGate>
+                    <DashboardPage />
+                  </PasswordGate>
+                } />
+                
                 <Route path="/clientes" element={<ClientesPage />} />
                 
                 <Route path="/produtos" element={
@@ -67,7 +74,6 @@ const App = () => {
                 <Route path="/ordens/:id" element={<OrdemDetailPage />} />
                 <Route path="/vendas" element={<VendasPage />} />
                 
-                {/* Nova Rota Financeira (Protegida) */}
                 <Route path="/financeiro" element={
                   <PasswordGate>
                     <FinanceiroPage />

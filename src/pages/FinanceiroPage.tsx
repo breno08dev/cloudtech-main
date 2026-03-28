@@ -35,6 +35,9 @@ export default function FinanceiroPage() {
   const [filtroDataCusto, setFiltroDataCusto] = useState(getTodayString());
   const [mostrarTodos, setMostrarTodos] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
+  
+  // ADICIONADO: Estado para o modal de exclusão de movimentação/venda
+  const [itemCaixaToDelete, setItemCaixaToDelete] = useState<{ id: string, tipo: string } | null>(null);
 
   // Formulários
   const [saldoInicial, setSaldoInicial] = useState(0);
@@ -297,6 +300,52 @@ export default function FinanceiroPage() {
     },
   });
 
+  // ADICIONADO: NOVA MUTATION PARA EXCLUIR MOVIMENTAÇÃO / VENDA
+  const excluirHistoricoMut = useMutation({
+    mutationFn: async ({ id, tipo }: { id: string; tipo: string }) => {
+      if (tipo === 'venda') {
+        // 1. Busca os itens para devolver ao estoque
+        const { data: itens } = await (supabase as any).from('venda_itens').select('produto_id, quantidade').eq('venda_id', id);
+        
+        // 2. Devolve o estoque de cada item
+        if (itens && itens.length > 0) {
+          for (const item of itens) {
+            const { data: prod } = await (supabase as any).from('produto_variacoes').select('estoque').eq('id', item.produto_id).single();
+            if (prod) {
+              await (supabase as any).from('produto_variacoes').update({ estoque: prod.estoque + item.quantidade }).eq('id', item.produto_id);
+            }
+          }
+        }
+        
+        // 3. Deleta a venda (os itens são apagados em cascata ou manualmente)
+        await (supabase as any).from('venda_itens').delete().eq('venda_id', id);
+        const { error } = await (supabase as any).from('vendas').delete().eq('id', id);
+        if (error) throw error;
+        
+      } else if (tipo === 'os') {
+        // Se for OS, não deletamos, apenas voltamos o status para tirar do fechamento atual
+        const { error } = await (supabase as any).from('ordens_servico').update({ 
+          status: 'pronto', 
+          data_finalizacao: null 
+        }).eq('id', id);
+        if (error) throw error;
+        
+      } else {
+        // Se for entrada/saída avulsa
+        const { error } = await (supabase as any).from('movimentacoes_caixa').delete().eq('id', id);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => { 
+      toast.success("Registo removido!", { description: "O caixa foi atualizado e o saldo recalculado." }); 
+      setItemCaixaToDelete(null);
+      queryClient.invalidateQueries({ queryKey: ["vendas_caixa_atual"] }); 
+      queryClient.invalidateQueries({ queryKey: ["movimentacoes_caixa"] }); 
+      queryClient.invalidateQueries({ queryKey: ["os_caixa_atual"] }); 
+    },
+    onError: (err: any) => toast.error("Erro ao excluir", { description: err.message })
+  });
+
   // ================= MUTATIONS DE CUSTOS =================
   const salvarCustoMut = useMutation({
     mutationFn: async () => {
@@ -450,11 +499,15 @@ export default function FinanceiroPage() {
                       <TableHead className="font-bold py-4 text-xs uppercase tracking-wider">Cliente</TableHead>
                       <TableHead className="font-bold py-4 text-xs uppercase tracking-wider">Detalhes</TableHead>
                       <TableHead className="font-bold py-4 text-xs uppercase tracking-wider text-right pr-6">Valor</TableHead>
+                      {/* ADICIONADO: Coluna vazia para a lixeira */}
+                      <TableHead className="w-12"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {historicoCaixa.length === 0 ? (
-                      <TableRow><TableCell colSpan={5} className="text-center py-10 text-muted-foreground font-medium">Nenhuma venda ou movimentação registada nesta sessão.</TableCell></TableRow>
+                    
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center py-10 text-muted-foreground font-medium">Nenhuma venda ou movimentação registada nesta sessão.</TableCell></TableRow>
                     ) : (
                       historicoCaixa.map((h: any) => (
                         <TableRow key={`${h.tipo}-${h.id}`} className="border-border/20">
@@ -468,6 +521,17 @@ export default function FinanceiroPage() {
                           <TableCell className="text-xs text-muted-foreground">{h.descricao}</TableCell>
                           <TableCell className={cn("text-right font-mono font-black text-[15px] pr-6", h.isSaida ? "text-red-500" : "text-emerald-600")}>
                             {h.isSaida ? "- " : "+ "}R$ {Number(h.valor).toFixed(2)}
+                          </TableCell>
+                          {/* ADICIONADO: Botão de exclusão */}
+                          <TableCell>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={() => setItemCaixaToDelete({ id: h.id, tipo: h.tipo })} 
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </TableCell>
                         </TableRow>
                       ))
@@ -589,6 +653,32 @@ export default function FinanceiroPage() {
       </Tabs>
 
       {/* ================= MODAIS ================= */}
+
+      {/* ADICIONADO: Modal Excluir Histórico do Caixa */}
+      <Dialog open={!!itemCaixaToDelete} onOpenChange={(open) => !open && setItemCaixaToDelete(null)}>
+        <DialogContent className="sm:max-w-sm rounded-[2rem] p-6 text-center border-red-500/20 shadow-2xl">
+          <div className="mx-auto bg-red-500/10 p-4 rounded-full w-fit mb-3">
+            <AlertCircle className="h-8 w-8 text-red-500" />
+          </div>
+          <DialogTitle className="text-2xl font-black mb-2 text-foreground">Excluir Registo</DialogTitle>
+          <p className="text-sm text-muted-foreground font-medium mb-6 px-2">
+            {itemCaixaToDelete?.tipo === 'venda' ? 'A venda será apagada e os itens voltarão para o estoque.' : 
+             itemCaixaToDelete?.tipo === 'os' ? 'A OS será removida do caixa atual e voltará para o status "Pronto".' :
+             'Esta movimentação será apagada permanentemente do caixa.'}
+          </p>
+          
+          <Button 
+            onClick={() => { if(itemCaixaToDelete) excluirHistoricoMut.mutate({ id: itemCaixaToDelete.id, tipo: itemCaixaToDelete.tipo }); }} 
+            disabled={excluirHistoricoMut.isPending} 
+            variant="destructive" 
+            className="w-full h-12 rounded-xl font-bold text-base shadow-lg shadow-red-500/20 hover:bg-red-600 transition-colors"
+          >
+            {excluirHistoricoMut.isPending ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <Trash2 className="h-5 w-5 mr-2" />}
+            Confirmar Exclusão
+          </Button>
+          <Button variant="ghost" onClick={() => setItemCaixaToDelete(null)} className="w-full mt-2 font-bold rounded-xl h-11 hover:bg-muted/80">Cancelar</Button>
+        </DialogContent>
+      </Dialog>
       
       {/* Modal Excluir Custo */}
       <Dialog open={!!itemToDelete} onOpenChange={(open) => !open && setItemToDelete(null)}>

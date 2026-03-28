@@ -8,7 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Search, ShoppingCart, Plus, Minus, Trash2, CreditCard, Banknote, Smartphone, Loader2, Check, ChevronsUpDown, PackageOpen, BadgePercent, Printer, Barcode } from "lucide-react";
+import { Search, ShoppingCart, Plus, Minus, Trash2, CreditCard, Banknote, Smartphone, Loader2, Check, ChevronsUpDown, PackageOpen, BadgePercent, Printer, Barcode, PieChart } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -36,7 +36,16 @@ export default function VendasPage() {
   
   const [clienteId, setClienteId] = useState<string>("avulso");
   const [openCliente, setOpenCliente] = useState(false);
+  
+  // Estados de Pagamento
   const [formaPagamento, setFormaPagamento] = useState<string>("dinheiro");
+  const [valorRecebido, setValorRecebido] = useState<number | "">(""); // NOVO: Para calcular o troco
+  const [pagamentoMisto, setPagamentoMisto] = useState({
+    dinheiro: 0,
+    pix: 0,
+    cartao_credito: 0,
+    cartao_debito: 0
+  });
   
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
 
@@ -113,6 +122,22 @@ export default function VendasPage() {
   const cartTotal = useMemo(() => cart.reduce((acc, item) => acc + (getProductPrice(item.produto) * item.quantidade), 0), [cart, isLojista]);
   const cartItemsCount = useMemo(() => cart.reduce((acc, item) => acc + item.quantidade, 0), [cart]);
 
+  // Lógica de Pagamento Misto
+  const somaMisto = (pagamentoMisto.dinheiro || 0) + (pagamentoMisto.pix || 0) + (pagamentoMisto.cartao_credito || 0) + (pagamentoMisto.cartao_debito || 0);
+  const faltaMisto = cartTotal - somaMisto;
+
+  const getFormaPagamentoString = () => {
+    if (formaPagamento !== "misto") return formaPagamento.replace('_', ' ').toUpperCase();
+    
+    const partes = [];
+    if (pagamentoMisto.dinheiro > 0) partes.push(`Din R$${pagamentoMisto.dinheiro.toFixed(2)}`);
+    if (pagamentoMisto.pix > 0) partes.push(`PIX R$${pagamentoMisto.pix.toFixed(2)}`);
+    if (pagamentoMisto.cartao_credito > 0) partes.push(`Créd R$${pagamentoMisto.cartao_credito.toFixed(2)}`);
+    if (pagamentoMisto.cartao_debito > 0) partes.push(`Déb R$${pagamentoMisto.cartao_debito.toFixed(2)}`);
+    
+    return `MISTO (${partes.join(' | ')})`;
+  };
+
   const addToCart = (produto: SellableItem) => {
     setCart((prev) => {
       const existing = prev.find((item) => item.produto.id === produto.id);
@@ -156,15 +181,22 @@ export default function VendasPage() {
   };
 
   const removeFromCart = (produtoId: string) => setCart((prev) => prev.filter((item) => item.produto.id !== produtoId));
-  const clearCart = () => { setCart([]); setClienteId("avulso"); setFormaPagamento("dinheiro"); };
+  
+  const clearCart = () => { 
+    setCart([]); 
+    setClienteId("avulso"); 
+    setFormaPagamento("dinheiro"); 
+    setValorRecebido("");
+    setPagamentoMisto({ dinheiro: 0, pix: 0, cartao_credito: 0, cartao_debito: 0 });
+  };
 
-  // ================= NOVA LÓGICA DE IMPRESSÃO (Igual à OS) =================
   const imprimirCupom = () => {
     const nomeEmpresa = config?.nome_empresa || "MINHA EMPRESA";
     const endereco = config?.endereco || "";
     const telefone = config?.telefone || "";
     const nomeCliente = clienteId === "avulso" ? "Avulso" : clientes.find((c) => c.id === clienteId)?.nome || "Não informado";
     const dataAtual = new Date().toLocaleString("pt-BR");
+    const pagamentoFormatado = getFormaPagamentoString();
 
     const linhasProdutos = cart.map(item => {
       const pu = getProductPrice(item.produto);
@@ -196,10 +228,22 @@ export default function VendasPage() {
       <body>
         <div class="center"><h2 class="bold" style="font-size: 16px;">${nomeEmpresa}</h2>${endereco ? `<p>${endereco}</p>` : ""}${telefone ? `<p>Tel: ${telefone}</p>` : ""}<div class="linha"></div><h3 class="bold">CUPOM NAO FISCAL</h3><p>${dataAtual}</p></div>
         <div class="linha"></div>
-        <div style="margin-bottom: 8px;"><p><span class="bold">Cliente:</span> ${nomeCliente}</p><p><span class="bold">Pagamento:</span> ${formaPagamento.toUpperCase()}</p></div>
+        <div style="margin-bottom: 8px;"><p><span class="bold">Cliente:</span> ${nomeCliente}</p><p><span class="bold">Pagamento:</span> ${pagamentoFormatado}</p></div>
         <table><thead><tr><th>QTD</th><th>PRODUTO</th><th class="right">UN</th><th class="right">TOT</th></tr></thead><tbody>${linhasProdutos}</tbody></table>
         <div class="linha"></div>
         <div class="right"><h2 class="bold" style="font-size: 16px;">TOTAL: R$ ${cartTotal.toFixed(2)}</h2></div>
+        
+        ${formaPagamento === 'misto' && faltaMisto < -0.01 ? `
+          <div class="right" style="margin-top: 4px;"><p class="bold" style="font-size: 14px;">TROCO: R$ ${Math.abs(faltaMisto).toFixed(2)}</p></div>
+        ` : ''}
+        
+        ${(formaPagamento === 'dinheiro' || formaPagamento === 'pix') && Number(valorRecebido) > cartTotal ? `
+          <div class="right" style="margin-top: 6px;">
+            <p style="font-size: 11px;">Recebido: R$ ${Number(valorRecebido).toFixed(2)}</p>
+            <p class="bold" style="font-size: 14px; margin-top: 2px;">TROCO: R$ ${(Number(valorRecebido) - cartTotal).toFixed(2)}</p>
+          </div>
+        ` : ''}
+        
         <div class="center" style="margin-top: 20px;"><p class="bold">Obrigado pela preferencia!</p><p style="font-size: 10px; margin-top: 5px;">Sistema</p></div>
       </body></html>
     `;
@@ -233,17 +277,20 @@ export default function VendasPage() {
       }, 500);
     }
   };
-  // ================= FIM NOVA LÓGICA DE IMPRESSÃO =================
 
   const checkoutMutation = useMutation({
     mutationFn: async (shouldPrint: boolean) => {
       if (cart.length === 0) throw new Error("O carrinho está vazio.");
+      if (formaPagamento === "misto" && faltaMisto > 0.01) throw new Error("O valor misto não cobre o total da venda.");
+
+      const pagamentoFinalString = getFormaPagamentoString();
 
       const { data: venda, error: vendaErr } = await (supabase as any).from("vendas").insert({
         cliente_id: clienteId === "avulso" ? null : clienteId,
         valor_total: cartTotal,
-        forma_pagamento: formaPagamento,
+        forma_pagamento: pagamentoFinalString,
       }).select("id").single();
+      
       if (vendaErr) throw vendaErr;
 
       const itensPayload = cart.map((item) => ({
@@ -273,6 +320,8 @@ export default function VendasPage() {
     onError: (err: any) => { toast.error(err.message || "Erro ao finalizar."); },
   });
 
+  const isCobrarDisabled = cart.length === 0 || (formaPagamento === 'misto' && faltaMisto > 0.01);
+
   return (
     <>
       <Dialog open={isConfirmModalOpen} onOpenChange={setIsConfirmModalOpen}>
@@ -284,11 +333,23 @@ export default function VendasPage() {
           <div className="py-6 flex flex-col items-center justify-center gap-2 text-center bg-muted/30 rounded-2xl border border-border/40">
             <p className="text-muted-foreground font-medium text-xs uppercase tracking-widest">Valor a Cobrar</p>
             <p className="text-5xl font-black text-primary font-mono tracking-tighter">R$ {cartTotal.toFixed(2)}</p>
-            <div className="mt-3 inline-flex items-center gap-2 bg-background px-3 py-1.5 rounded-lg border border-border/50 shadow-sm text-xs font-bold text-foreground/80 uppercase">
-              <span>{cartItemsCount} {cartItemsCount === 1 ? 'item' : 'itens'}</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50"></span>
-              <span className="text-primary">{formaPagamento.replace('_', ' ')}</span>
+            <div className="mt-3 inline-flex items-center justify-center text-center gap-2 bg-background px-3 py-1.5 rounded-lg border border-border/50 shadow-sm text-xs font-bold text-foreground/80 uppercase w-full">
+              <span className="shrink-0">{cartItemsCount} {cartItemsCount === 1 ? 'item' : 'itens'}</span>
+              <span className="w-1.5 h-1.5 shrink-0 rounded-full bg-muted-foreground/50"></span>
+              <span className="text-primary truncate">{getFormaPagamentoString()}</span>
             </div>
+            
+            {formaPagamento === 'misto' && faltaMisto < -0.01 && (
+              <p className="text-emerald-500 font-bold uppercase text-xs mt-2 bg-emerald-500/10 px-3 py-1 rounded-md">
+                Troco: R$ {Math.abs(faltaMisto).toFixed(2)}
+              </p>
+            )}
+
+            {(formaPagamento === "dinheiro" || formaPagamento === "pix") && Number(valorRecebido) > cartTotal && (
+              <p className="text-emerald-500 font-bold uppercase text-xs mt-2 bg-emerald-500/10 px-3 py-1 rounded-md border border-emerald-500/20">
+                Troco: R$ {(Number(valorRecebido) - cartTotal).toFixed(2)}
+              </p>
+            )}
           </div>
 
           <div className="flex flex-col gap-3 mt-4">
@@ -304,7 +365,6 @@ export default function VendasPage() {
         </DialogContent>
       </Dialog>
 
-      {/* PDV ESTRUTURA GOLD STANDARD: h-full absoluto sem scroll na página */}
       <div className="flex flex-col lg:flex-row gap-4 h-full w-full animate-in fade-in duration-500">
         
         {/* LADO ESQUERDO: Catálogo */}
@@ -495,16 +555,75 @@ export default function VendasPage() {
                   <SelectItem value="pix" className="text-sm"><div className="flex items-center gap-2"><Smartphone className="h-4 w-4 text-teal-500" /> PIX</div></SelectItem>
                   <SelectItem value="cartao_credito" className="text-sm"><div className="flex items-center gap-2"><CreditCard className="h-4 w-4 text-indigo-500" /> Crédito</div></SelectItem>
                   <SelectItem value="cartao_debito" className="text-sm"><div className="flex items-center gap-2"><CreditCard className="h-4 w-4 text-orange-500" /> Débito</div></SelectItem>
+                  {/* NOVA OPÇÃO MISTA */}
+                  <SelectItem value="misto" className="text-sm bg-muted/30"><div className="flex items-center gap-2"><PieChart className="h-4 w-4 text-purple-500" /> Múltiplas (Misto)</div></SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {/* CAMPO DE VALOR RECEBIDO (TROCO) */}
+            {(formaPagamento === "dinheiro" || formaPagamento === "pix") && (
+              <div className="grid gap-2 mt-1">
+                <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Valor Recebido (Para Troco)</Label>
+                <Input 
+                  type="number" 
+                  min="0" 
+                  step="0.01" 
+                  value={valorRecebido} 
+                  onChange={(e) => setValorRecebido(e.target.value ? Number(e.target.value) : "")} 
+                  className="h-10 rounded-xl bg-background border-border/60 font-mono text-sm shadow-inner focus-visible:ring-primary" 
+                  placeholder={`R$ ${cartTotal.toFixed(2)}`}
+                />
+                {Number(valorRecebido) > cartTotal && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-lg mt-1 flex justify-between items-center">
+                    <span className="text-[10px] font-bold uppercase text-emerald-600">Troco a devolver:</span>
+                    <span className="text-sm font-black text-emerald-600 font-mono">R$ {(Number(valorRecebido) - cartTotal).toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* INPUTS DE PAGAMENTO MISTO CONDICIONAL */}
+            {formaPagamento === "misto" && (
+              <div className="grid grid-cols-2 gap-3 mt-1 bg-background p-3 rounded-xl border border-border/50 shadow-inner">
+                <div>
+                  <Label className="text-[9px] uppercase font-bold text-muted-foreground ml-1">Dinheiro</Label>
+                  <Input type="number" min="0" step="0.01" value={pagamentoMisto.dinheiro || ""} onChange={(e) => setPagamentoMisto({...pagamentoMisto, dinheiro: Number(e.target.value)})} className="h-8 mt-1 text-xs font-mono" placeholder="0.00" />
+                </div>
+                <div>
+                  <Label className="text-[9px] uppercase font-bold text-muted-foreground ml-1">PIX</Label>
+                  <Input type="number" min="0" step="0.01" value={pagamentoMisto.pix || ""} onChange={(e) => setPagamentoMisto({...pagamentoMisto, pix: Number(e.target.value)})} className="h-8 mt-1 text-xs font-mono" placeholder="0.00" />
+                </div>
+                <div>
+                  <Label className="text-[9px] uppercase font-bold text-muted-foreground ml-1">Crédito</Label>
+                  <Input type="number" min="0" step="0.01" value={pagamentoMisto.cartao_credito || ""} onChange={(e) => setPagamentoMisto({...pagamentoMisto, cartao_credito: Number(e.target.value)})} className="h-8 mt-1 text-xs font-mono" placeholder="0.00" />
+                </div>
+                <div>
+                  <Label className="text-[9px] uppercase font-bold text-muted-foreground ml-1">Débito</Label>
+                  <Input type="number" min="0" step="0.01" value={pagamentoMisto.cartao_debito || ""} onChange={(e) => setPagamentoMisto({...pagamentoMisto, cartao_debito: Number(e.target.value)})} className="h-8 mt-1 text-xs font-mono" placeholder="0.00" />
+                </div>
+                
+                <div className="col-span-2 flex justify-between items-center pt-2 mt-1 border-t border-border/40">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                    {faltaMisto > 0.01 ? "Falta:" : faltaMisto < -0.01 ? "Troco:" : "Fechado:"}
+                  </span>
+                  <span className={cn("text-sm font-mono font-black", faltaMisto > 0.01 ? "text-red-500" : "text-emerald-500")}>
+                    R$ {Math.abs(faltaMisto).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            )}
             
             <div className="pt-2 pb-1 flex justify-between items-end">
               <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Total</span>
               <span className="text-4xl font-black text-primary tracking-tighter font-mono">R$ {cartTotal.toFixed(2)}</span>
             </div>
             
-            <Button className="w-full h-12 rounded-xl text-base font-bold shadow-lg shadow-primary/20" disabled={cart.length === 0} onClick={() => setIsConfirmModalOpen(true)}>
+            <Button 
+              className="w-full h-12 rounded-xl text-base font-bold shadow-lg shadow-primary/20 transition-all disabled:opacity-50" 
+              disabled={isCobrarDisabled} 
+              onClick={() => setIsConfirmModalOpen(true)}
+            >
               Cobrar
             </Button>
           </div>

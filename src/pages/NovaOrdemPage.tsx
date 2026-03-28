@@ -245,7 +245,7 @@ export default function NovaOrdemPage() {
                 { id: "checklist_nao_liga" as const, label: "Aparelho não liga" },
                 { id: "checklist_molhado" as const, label: "Molhado / Líquido" },
                 { id: "checklist_bateria_ruim" as const, label: "Bateria degradada" },
-                { id: "checklist_camera_quebrada" as const, label: "Câmera danificada" },
+                { id: "checklist_camera_quebrada" as const, label: "Bloqueado" },
               ].map((item) => (
                 <Controller
                   key={item.id}

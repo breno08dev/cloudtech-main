@@ -11,14 +11,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { OS_STATUS_MAP } from "@/lib/constants";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { 
-  Printer, Plus, Trash2, Loader2, Save, FileText, ShieldCheck, Undo2,
+  Printer, Plus, Trash2, Loader2, FileText, ShieldCheck, Undo2,
   UserCircle, Smartphone, Wrench, Package, ClipboardList, CheckCircle2,
-  Banknote, CreditCard, QrCode
+  Banknote, CreditCard, QrCode, PieChart, Save
 } from "lucide-react";
 
 export default function OrdemDetailPage() {
@@ -26,7 +26,6 @@ export default function OrdemDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  // === 1. TODOS OS HOOKS (STATES E MUTATIONS) PRIMEIRO ===
   const [newPeca, setNewPeca] = useState({ produto_id: "", quantidade: 1 });
   const [newServico, setNewServico] = useState({ descricao: "", valor: 0 });
   const [editForm, setEditForm] = useState<any>({
@@ -38,10 +37,10 @@ export default function OrdemDetailPage() {
     peca_original: false
   });
   
-  const [printMode, setPrintMode] = useState<"os" | "garantia" | "estorno">("os");
-
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [paymentData, setPaymentData] = useState({ metodo: "pix", desconto: 0 });
+  const [pagamentoMisto, setPagamentoMisto] = useState({ dinheiro: 0, pix: 0, cartao_credito: 0, cartao_debito: 0 });
+  const [valorRecebido, setValorRecebido] = useState<number | "">("");
 
   const { data: config } = useQuery({
     queryKey: ["configuracoes"],
@@ -103,6 +102,24 @@ export default function OrdemDetailPage() {
     }
   }, [data?.ordem, config]);
 
+  const valorPecasEServicos = (data?.ordem?.valor_pecas || 0) + (data?.ordem?.valor_servico || 0);
+  const valorFinalComDesconto = Math.max(0, valorPecasEServicos - paymentData.desconto);
+  
+  const somaMisto = (pagamentoMisto.dinheiro || 0) + (pagamentoMisto.pix || 0) + (pagamentoMisto.cartao_credito || 0) + (pagamentoMisto.cartao_debito || 0);
+  const faltaMisto = valorFinalComDesconto - somaMisto;
+
+  const getFormaPagamentoString = () => {
+    if (paymentData.metodo !== "misto") return paymentData.metodo;
+    
+    const partes = [];
+    if (pagamentoMisto.dinheiro > 0) partes.push(`Din R$${pagamentoMisto.dinheiro.toFixed(2)}`);
+    if (pagamentoMisto.pix > 0) partes.push(`PIX R$${pagamentoMisto.pix.toFixed(2)}`);
+    if (pagamentoMisto.cartao_credito > 0) partes.push(`Créd R$${pagamentoMisto.cartao_credito.toFixed(2)}`);
+    if (pagamentoMisto.cartao_debito > 0) partes.push(`Déb R$${pagamentoMisto.cartao_debito.toFixed(2)}`);
+    
+    return `MISTO (${partes.join(' | ')})`;
+  };
+
   const recalcTotals = async (osId: string) => {
     const { data: pecasData } = await supabase.from("ordem_servico_pecas").select("subtotal").eq("ordem_servico_id", osId);
     const { data: servicosData } = await supabase.from("ordem_servico_servicos").select("valor").eq("ordem_servico_id", osId);
@@ -119,7 +136,7 @@ export default function OrdemDetailPage() {
     }).eq("id", osId);
   };
 
-  const saveOsMutation = useMutation({
+const saveOsMutation = useMutation({
     mutationFn: async (overrides?: any) => {
       const rawUpdates = { ...editForm, ...overrides };
       const updates: any = {};
@@ -142,12 +159,12 @@ export default function OrdemDetailPage() {
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success("Ordem de Serviço guardada!");
+      toast.success("Ordem de Serviço salva com sucesso!");
       queryClient.invalidateQueries({ queryKey: ["ordem_detail", id] });
       queryClient.invalidateQueries({ queryKey: ["ordens_servico"] });
-      navigate("/ordens"); 
+      navigate("/ordens"); // <-- ADICIONADO AQUI: Redireciona para a lista
     },
-    onError: (err: any) => toast.error(`Erro ao guardar: ${err.message}`),
+    onError: (err: any) => toast.error(`Erro ao salvar: ${err.message}`),
   });
   
   const addPecaMutation = useMutation({
@@ -192,7 +209,6 @@ export default function OrdemDetailPage() {
     onSuccess: () => { toast.success("Serviço adicionado"); setNewServico({ descricao: "", valor: 0 }); queryClient.invalidateQueries({ queryKey: ["ordem_detail", id] }); },
   });
 
-  // NOVA MUTATION PARA REMOVER SERVIÇO
   const removeServicoMutation = useMutation({
     mutationFn: async (servicoId: string) => {
       await supabase.from("ordem_servico_servicos").delete().eq("id", servicoId);
@@ -208,6 +224,8 @@ export default function OrdemDetailPage() {
   const handleStatusChange = (newStatus: string) => {
     if (newStatus === "entregue") {
       setPaymentData({ metodo: "pix", desconto: 0 }); 
+      setPagamentoMisto({ dinheiro: 0, pix: 0, cartao_credito: 0, cartao_debito: 0 });
+      setValorRecebido("");
       setIsPaymentModalOpen(true);
     } else {
       setEditForm({ ...editForm, status: newStatus });
@@ -215,12 +233,16 @@ export default function OrdemDetailPage() {
   };
 
   const handleConfirmPayment = () => {
-    const valorPecasEServicos = (data?.ordem?.valor_pecas || 0) + (data?.ordem?.valor_servico || 0);
+    if (paymentData.metodo === "misto" && faltaMisto > 0.01) {
+      toast.error("O valor misto não cobre o total da OS.");
+      return;
+    }
+
     const overrides = {
       status: "entregue",
-      forma_pagamento: paymentData.metodo,
+      forma_pagamento: getFormaPagamentoString(),
       desconto: paymentData.desconto,
-      valor_total: Math.max(0, valorPecasEServicos - paymentData.desconto)
+      valor_total: valorFinalComDesconto
     };
     
     setEditForm({ ...editForm, ...overrides });
@@ -228,18 +250,14 @@ export default function OrdemDetailPage() {
     saveOsMutation.mutate(overrides);
   };
 
-  // === 2. VERIFICAÇÃO DE LOADING ===
   if (isLoading) return <div className="flex h-[80vh] items-center justify-center"><Loader2 className="h-10 w-10 animate-spin text-primary/60" /></div>;
   if (isError || !data?.ordem) return <div className="p-8 text-center text-destructive font-medium">Erro ao carregar a OS.</div>;
 
-  // === 3. LÓGICA DE IMPRESSÃO ===
   const { ordem, pecas, servicos, produtos } = data;
   const nomeLoja = config?.nome_empresa || "Nome da Assistência";
   const enderecoLoja = config?.endereco || "Endereço não configurado";
   const telefoneLoja = config?.telefone || "Telefone não configurado";
-
-  const valorTotalSemDesconto = (ordem.valor_pecas || 0) + (ordem.valor_servico || 0);
-  const valorFinalComDesconto = Math.max(0, valorTotalSemDesconto - paymentData.desconto);
+  const valorTotalSemDescontoConst = (ordem.valor_pecas || 0) + (ordem.valor_servico || 0);
 
   const logoHtml = config?.logo_url ? `<img src="${config.logo_url}" alt="Logo" style="max-height: 50px; margin: 0 auto 10px auto; display: block;" />` : '';
 
@@ -260,10 +278,10 @@ export default function OrdemDetailPage() {
   const prazoGarantia = editForm.garantia_servico?.toUpperCase() || config?.garantia_padrao?.toUpperCase() || "90 DIAS";
   const isPecaOriginal = ordem.peca_original ? "☑ SIM &emsp; ☐ NÃO" : "☐ SIM &emsp; ☑ NÃO";
 
-  const gerarImpressao = () => {
-    let htmlContent = "";
+  const gerarImpressao = (modo: "os" | "garantia" | "estorno") => {
+  let htmlContent = "";
 
-    if (printMode === "os") {
+    if (modo === "os") {
       htmlContent = `
         <!DOCTYPE html>
         <html>
@@ -359,7 +377,7 @@ export default function OrdemDetailPage() {
         </body>
         </html>
       `;
-    } else if (printMode === "garantia") {
+    } else if (modo === "garantia") {
       htmlContent = `
         <!DOCTYPE html>
         <html>
@@ -446,7 +464,7 @@ export default function OrdemDetailPage() {
         </body>
         </html>
       `;
-    } else if (printMode === "estorno") {
+    } else if (modo === "estorno") {
       htmlContent = `
         <!DOCTYPE html>
         <html>
@@ -505,38 +523,37 @@ export default function OrdemDetailPage() {
       `;
     }
 
-   // === NOVA LÓGICA DE IMPRESSÃO À PROVA DE FALHAS ===
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed'; // fixed evita que a página role para baixo
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0px';
-    iframe.style.height = '0px';
-    iframe.style.border = 'none';
-    document.body.appendChild(iframe);
+   const iframe = document.createElement('iframe');
+   iframe.style.position = 'fixed';
+   iframe.style.right = '0';
+   iframe.style.bottom = '0';
+   iframe.style.width = '0px';
+   iframe.style.height = '0px';
+   iframe.style.border = 'none';
+   document.body.appendChild(iframe);
 
-    const doc = iframe.contentWindow?.document;
-    if (doc) {
-      doc.open(); 
-      doc.write(htmlContent); 
-      doc.close();
+   const doc = iframe.contentWindow?.document;
+   if (doc) {
+     doc.open(); 
+     doc.write(htmlContent); 
+     doc.close();
 
-      // O evento onafterprint garante que o sistema só remove o arquivo da memória 
-      // DEPOIS que a impressão for concluída ou cancelada, evitando downloads acidentais.
-      if (iframe.contentWindow) {
-        iframe.contentWindow.onafterprint = () => {
-          if (document.body.contains(iframe)) {
-            document.body.removeChild(iframe);
-          }
-        };
-      }
+     if (iframe.contentWindow) {
+       iframe.contentWindow.onafterprint = () => {
+         if (document.body.contains(iframe)) {
+           document.body.removeChild(iframe);
+         }
+       };
+     }
 
-      setTimeout(() => { 
-        iframe.contentWindow?.focus(); 
-        iframe.contentWindow?.print(); 
-      }, 500); // 500ms é o tempo para o navegador processar o CSS e a Logo antes de imprimir
-    }
+     setTimeout(() => { 
+       iframe.contentWindow?.focus(); 
+       iframe.contentWindow?.print(); 
+     }, 500); 
+   }
   };
+
+  const isConfirmarDisabled = saveOsMutation.isPending || (paymentData.metodo === 'misto' && faltaMisto > 0.01);
 
   return (
     <div className="print:hidden space-y-6 max-w-5xl mx-auto pb-12 animate-in fade-in duration-500">
@@ -549,17 +566,14 @@ export default function OrdemDetailPage() {
           </h1>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => { setPrintMode("os"); setTimeout(gerarImpressao, 100); }} className="h-11 rounded-xl font-semibold bg-background hover:bg-muted/80 border-border/60">
+          <Button variant="outline" onClick={() => gerarImpressao("os")} className="h-11 rounded-xl font-semibold bg-background hover:bg-muted/80 border-border/60">
             <Printer className="h-4 w-4 mr-2" /> Imprimir OS
           </Button>
-          <Button variant="outline" onClick={() => { setPrintMode("garantia"); setTimeout(gerarImpressao, 100); }} className="h-11 rounded-xl font-semibold border-amber-500/30 text-amber-600 bg-amber-500/5 hover:bg-amber-500/10">
+          <Button variant="outline" onClick={() => gerarImpressao("garantia")} className="h-11 rounded-xl font-semibold border-amber-500/30 text-amber-600 bg-amber-500/5 hover:bg-amber-500/10">
             <ShieldCheck className="h-4 w-4 mr-2" /> Imprimir Garantia
           </Button>
-          <Button variant="outline" onClick={() => { setPrintMode("estorno"); setTimeout(gerarImpressao, 100); }} className="h-11 rounded-xl font-semibold border-red-500/30 text-red-600 bg-red-500/5 hover:bg-red-500/10">
+          <Button variant="outline" onClick={() => gerarImpressao("estorno")} className="h-11 rounded-xl font-semibold border-red-500/30 text-red-600 bg-red-500/5 hover:bg-red-500/10">
             <Undo2 className="h-4 w-4 mr-2" /> Imprimir Estorno
-          </Button>
-          <Button onClick={() => saveOsMutation.mutate({})} disabled={saveOsMutation.isPending} className="h-11 rounded-xl font-bold bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 px-6 ml-2">
-            {saveOsMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />} Salvar
           </Button>
         </div>
       </div>
@@ -604,7 +618,7 @@ export default function OrdemDetailPage() {
         <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm flex flex-col overflow-hidden">
           <CardHeader className="bg-card border-b border-border/40 pb-4 px-5 pt-5"><CardTitle className="text-sm font-bold flex items-center gap-2 text-foreground tracking-wide uppercase"><Wrench className="h-4 w-4 text-primary" /> Mão de Obra / Serviços</CardTitle></CardHeader>
           <CardContent className="p-0 flex flex-col flex-1">
-            <div className="flex-1 max-h-[250px] overflow-auto">
+            <div className="flex-1 max-h-[250px] overflow-auto scrollbar-thin">
               <Table><TableHeader className="bg-muted/20"><TableRow className="border-border/30"><TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground/80 font-bold py-3">Descrição</TableHead><TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground/80 font-bold text-right py-3">Valor</TableHead><TableHead className="w-12 py-3"></TableHead></TableRow></TableHeader>
                 <TableBody>
                   {servicos.length === 0 && (<TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-6 text-sm">Nenhum serviço.</TableCell></TableRow>)}
@@ -628,7 +642,7 @@ export default function OrdemDetailPage() {
         <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm flex flex-col overflow-hidden">
            <CardHeader className="bg-card border-b border-border/40 pb-4 px-5 pt-5"><CardTitle className="text-sm font-bold flex items-center gap-2 text-foreground tracking-wide uppercase"><Package className="h-4 w-4 text-emerald-500" /> Peças do Estoque</CardTitle></CardHeader>
           <CardContent className="p-0 flex flex-col flex-1">
-            <div className="flex-1 max-h-[250px] overflow-auto">
+            <div className="flex-1 max-h-[250px] overflow-auto scrollbar-thin">
               <Table><TableHeader className="bg-muted/20"><TableRow className="border-border/30"><TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground/80 font-bold py-3">Produto</TableHead><TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground/80 font-bold text-center py-3">Qtd</TableHead><TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground/80 font-bold text-right py-3">Total</TableHead><TableHead className="w-12 py-3"></TableHead></TableRow></TableHeader><TableBody>{pecas.length === 0 && (<TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-6 text-sm">Nenhuma peça.</TableCell></TableRow>)}{pecas.map((p: any) => {
                 const nomePeca = p.produto_variacoes?.produto_base?.nome || "Peça Excluída";
                 const descQualidade = p.produto_variacoes?.qualidade || "";
@@ -679,17 +693,18 @@ export default function OrdemDetailPage() {
 
         <Card className="rounded-3xl border-none shadow-xl shadow-primary/5 bg-gradient-to-br from-primary/10 via-background to-background flex flex-col justify-between relative overflow-hidden">
           <div className="absolute top-0 right-0 w-48 h-48 bg-primary/10 rounded-bl-[100px] -z-0 blur-xl pointer-events-none"></div>
-          <CardContent className="p-8 space-y-8 relative z-10 flex-1 flex flex-col justify-center">
-            <div className="space-y-5">
+          <CardContent className="p-8 space-y-6 relative z-10 flex-1 flex flex-col justify-center">
+            <div className="space-y-4">
               <div className="flex justify-between items-center text-base"><span className="text-muted-foreground font-semibold">Mão de Obra</span><span className="font-mono font-bold bg-background px-3 py-1 rounded-lg border border-border/40 shadow-sm">R$ {(ordem.valor_servico || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>
               <div className="flex justify-between items-center text-base"><span className="text-muted-foreground font-semibold">Peças</span><span className="font-mono font-bold bg-background px-3 py-1 rounded-lg border border-border/40 shadow-sm">R$ {(ordem.valor_pecas || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>
               {ordem.desconto > 0 && (<div className="flex justify-between items-center text-base text-red-500 font-medium"><span>Desconto</span><span className="font-mono font-bold bg-background px-3 py-1 rounded-lg border border-red-200 shadow-sm">- R$ {Number(ordem.desconto).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>)}
-              <div className="border-t-2 border-primary/20 pt-6 flex justify-between items-end"><span className="font-black uppercase tracking-widest text-sm text-primary mb-1">Total da OS</span><span className="text-5xl font-black text-primary font-mono tracking-tighter drop-shadow-sm">R$ {ordem.valor_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>
+              <div className="border-t-2 border-primary/20 pt-4 flex justify-between items-end"><span className="font-black uppercase tracking-widest text-sm text-primary mb-1">Total da OS</span><span className="text-5xl font-black text-primary font-mono tracking-tighter drop-shadow-sm">R$ {ordem.valor_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>
             </div>
-            <div className="grid gap-3 pt-6 mt-auto">
-              <Label className="text-xs font-bold uppercase text-muted-foreground/80 tracking-widest ml-1">Status</Label>
+            
+            <div className="grid gap-3 pt-4 mt-auto">
+              <Label className="text-xs font-bold uppercase text-muted-foreground/80 tracking-widest ml-1">Status do Equipamento</Label>
               <Select value={editForm.status} onValueChange={handleStatusChange}>
-                <SelectTrigger className="h-16 text-lg font-bold bg-background/80 backdrop-blur-md border border-border/60 shadow-sm rounded-2xl px-6"><SelectValue placeholder="Status" /></SelectTrigger>
+                <SelectTrigger className="h-14 text-base font-bold bg-background/80 backdrop-blur-md border border-border/60 shadow-sm rounded-2xl px-5"><SelectValue placeholder="Status" /></SelectTrigger>
                 <SelectContent className="rounded-2xl border-border/50 shadow-xl">
                   {Object.entries(OS_STATUS_MAP).map(([k, v]) => {
                     const chave = String(k).toLowerCase();
@@ -703,37 +718,55 @@ export default function OrdemDetailPage() {
                   })}
                 </SelectContent>
               </Select>
+              
+              {/* BOTÃO DE SALVAR QUE HAVIA SUMIDO AGORA EM DESTAQUE */}
+            <Button 
+                onClick={() => saveOsMutation.mutate({})} 
+                disabled={saveOsMutation.isPending} 
+                className="w-full h-14 mt-1 rounded-2xl font-bold text-lg bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 transition-all"
+              >
+                {saveOsMutation.isPending ? <Loader2 className="h-5 w-5 mr-2 animate-spin" /> : <Save className="h-5 w-5 mr-2" />}
+                Salvar Atualizações
+                </Button>
+
             </div>
           </CardContent>
         </Card>
       </div>
 
       <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
-        <DialogContent className="sm:max-w-md rounded-3xl p-0 overflow-hidden border-border/40 shadow-2xl">
-          <div className="bg-primary/10 p-6 flex flex-col items-center justify-center border-b border-border/40 relative">
+        {/* MODAL AJUSTADO: max-h-[90vh] e flex-col para forçar o scroll interno */}
+        <DialogContent className="sm:max-w-xl max-h-[90vh] flex flex-col rounded-3xl p-0 overflow-hidden border-border/40 shadow-2xl">
+          
+          {/* HEADER FIXO DO MODAL */}
+          <div className="bg-primary/10 p-6 flex flex-col items-center justify-center border-b border-border/40 relative shrink-0">
             <div className="absolute top-4 right-4 bg-background/50 px-3 py-1 rounded-full text-xs font-bold border border-border/60">OS: {ordem.numero_os}</div>
             <DialogTitle className="text-2xl font-black mt-2">Finalizar Entrega</DialogTitle>
           </div>
-          <div className="p-6 space-y-6 bg-background">
+          
+          {/* CORPO ROLÁVEL DO MODAL (A Mágica acontece aqui) */}
+          <div className="p-6 space-y-6 bg-background overflow-y-auto flex-1 scrollbar-thin">
             <div className="space-y-3">
               <Label className="text-sm font-bold uppercase tracking-wider text-muted-foreground/80">Forma de Pagamento</Label>
-              <RadioGroup value={paymentData.metodo} onValueChange={(v) => setPaymentData({...paymentData, metodo: v})} className="grid grid-cols-2 gap-3">
+              <RadioGroup value={paymentData.metodo} onValueChange={(v) => setPaymentData({...paymentData, metodo: v})} className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {[
                   { id: 'pix', label: 'PIX', icon: QrCode },
+                  { id: 'dinheiro', label: 'Dinheiro', icon: Banknote },
                   { id: 'cartao_credito', label: 'Crédito', icon: CreditCard },
                   { id: 'cartao_debito', label: 'Débito', icon: CreditCard },
-                  { id: 'dinheiro', label: 'Dinheiro', icon: Banknote },
+                  { id: 'misto', label: 'Múltiplas (Misto)', icon: PieChart, colSpan: true },
                 ].map((metodo) => (
-                  <div key={metodo.id} className="relative">
+                  <div key={metodo.id} className={cn("relative", metodo.colSpan ? "md:col-span-2" : "")}>
                     <RadioGroupItem value={metodo.id} id={metodo.id} className="peer sr-only" />
-                    <Label htmlFor={metodo.id} className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl border-2 border-border/50 bg-card hover:bg-muted/50 peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/5 cursor-pointer transition-all">
+                    <Label htmlFor={metodo.id} className="flex flex-col items-center justify-center gap-2 p-3 rounded-xl border-2 border-border/50 bg-card hover:bg-muted/50 peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/5 cursor-pointer transition-all h-full text-center">
                       <metodo.icon className={cn("h-6 w-6", paymentData.metodo === metodo.id ? 'text-primary' : 'text-muted-foreground')} />
-                      <span className="font-semibold">{metodo.label}</span>
+                      <span className="font-semibold text-xs">{metodo.label}</span>
                     </Label>
                   </div>
                 ))}
               </RadioGroup>
             </div>
+
             <div className="space-y-3">
               <Label className="text-sm font-bold uppercase tracking-wider text-muted-foreground/80">Aplicar Desconto (R$)</Label>
               <div className="relative">
@@ -741,16 +774,59 @@ export default function OrdemDetailPage() {
                 <Input type="number" min="0" step="0.01" value={paymentData.desconto || ""} onChange={(e) => setPaymentData({...paymentData, desconto: Number(e.target.value)})} className="h-12 pl-10 text-lg font-mono rounded-xl bg-card border-border/60 focus-visible:ring-primary" placeholder="0.00" />
               </div>
             </div>
-            <div className="bg-muted/30 p-4 rounded-2xl border border-border/40 space-y-2">
-              <div className="flex justify-between text-sm text-muted-foreground"><span>Subtotal:</span><span className="font-mono">R$ {valorTotalSemDesconto.toFixed(2)}</span></div>
+
+            {/* TROCO SIMPLES - APENAS PIX OU DINHEIRO */}
+            {(paymentData.metodo === "dinheiro" || paymentData.metodo === "pix") && (
+              <div className="grid gap-2 mt-1">
+                <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Valor Recebido (Para Troco)</Label>
+                <Input 
+                  type="number" min="0" step="0.01" 
+                  value={valorRecebido} 
+                  onChange={(e) => setValorRecebido(e.target.value ? Number(e.target.value) : "")} 
+                  className="h-10 rounded-xl bg-card border-border/60 font-mono text-sm shadow-inner focus-visible:ring-primary" 
+                  placeholder={`R$ ${valorFinalComDesconto.toFixed(2)}`}
+                />
+                {Number(valorRecebido) > valorFinalComDesconto && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-lg mt-1 flex justify-between items-center">
+                    <span className="text-[10px] font-bold uppercase text-emerald-600">Troco a devolver:</span>
+                    <span className="text-sm font-black text-emerald-600 font-mono">R$ {(Number(valorRecebido) - valorFinalComDesconto).toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* PAGAMENTO MISTO */}
+            {paymentData.metodo === "misto" && (
+              <div className="grid grid-cols-2 gap-3 mt-1 bg-card p-4 rounded-xl border border-border/50 shadow-inner">
+                <div><Label className="text-[9px] uppercase font-bold text-muted-foreground ml-1">Dinheiro</Label><Input type="number" min="0" step="0.01" value={pagamentoMisto.dinheiro || ""} onChange={(e) => setPagamentoMisto({...pagamentoMisto, dinheiro: Number(e.target.value)})} className="h-10 mt-1 text-xs font-mono rounded-lg" placeholder="0.00" /></div>
+                <div><Label className="text-[9px] uppercase font-bold text-muted-foreground ml-1">PIX</Label><Input type="number" min="0" step="0.01" value={pagamentoMisto.pix || ""} onChange={(e) => setPagamentoMisto({...pagamentoMisto, pix: Number(e.target.value)})} className="h-10 mt-1 text-xs font-mono rounded-lg" placeholder="0.00" /></div>
+                <div><Label className="text-[9px] uppercase font-bold text-muted-foreground ml-1">Crédito</Label><Input type="number" min="0" step="0.01" value={pagamentoMisto.cartao_credito || ""} onChange={(e) => setPagamentoMisto({...pagamentoMisto, cartao_credito: Number(e.target.value)})} className="h-10 mt-1 text-xs font-mono rounded-lg" placeholder="0.00" /></div>
+                <div><Label className="text-[9px] uppercase font-bold text-muted-foreground ml-1">Débito</Label><Input type="number" min="0" step="0.01" value={pagamentoMisto.cartao_debito || ""} onChange={(e) => setPagamentoMisto({...pagamentoMisto, cartao_debito: Number(e.target.value)})} className="h-10 mt-1 text-xs font-mono rounded-lg" placeholder="0.00" /></div>
+                
+                <div className="col-span-2 flex justify-between items-center pt-3 mt-1 border-t border-border/40">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                    {faltaMisto > 0.01 ? "Falta:" : faltaMisto < -0.01 ? "Troco:" : "Fechado:"}
+                  </span>
+                  <span className={cn("text-base font-mono font-black", faltaMisto > 0.01 ? "text-red-500" : "text-emerald-500")}>
+                    R$ {Math.abs(faltaMisto).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="bg-muted/30 p-4 rounded-2xl border border-border/40 space-y-2 mt-2">
+              <div className="flex justify-between text-sm text-muted-foreground"><span>Subtotal:</span><span className="font-mono">R$ {valorTotalSemDescontoConst.toFixed(2)}</span></div>
               {paymentData.desconto > 0 && (<div className="flex justify-between text-sm text-red-500 font-medium"><span>Desconto:</span><span className="font-mono">- R$ {paymentData.desconto.toFixed(2)}</span></div>)}
               <div className="flex justify-between items-end pt-2 border-t border-border/60"><span className="font-bold">Total a Pagar:</span><span className="text-3xl font-black text-primary font-mono tracking-tighter">R$ {valorFinalComDesconto.toFixed(2)}</span></div>
             </div>
           </div>
-          <DialogFooter className="p-4 bg-muted/20 border-t border-border/40 sm:justify-between flex-row">
+          
+          {/* FOOTER FIXO DO MODAL */}
+          <DialogFooter className="p-4 bg-muted/20 border-t border-border/40 sm:justify-between flex-row shrink-0">
             <Button variant="ghost" onClick={() => setIsPaymentModalOpen(false)} className="rounded-xl">Cancelar</Button>
-            <Button onClick={handleConfirmPayment} className="rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold shadow-lg shadow-primary/20 px-6"><CheckCircle2 className="mr-2 h-4 w-4" /> Confirmar Pagamento</Button>
+            <Button onClick={handleConfirmPayment} disabled={isConfirmarDisabled} className="rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold shadow-lg shadow-primary/20 px-6 disabled:opacity-50"><CheckCircle2 className="mr-2 h-4 w-4" /> Confirmar Pagamento</Button>
           </DialogFooter>
+          
         </DialogContent>
       </Dialog>
     </div>

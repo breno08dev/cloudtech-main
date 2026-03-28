@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell, Legend } from "recharts";
-import { BarChart3, TrendingUp, DollarSign, Wrench, ShoppingCart, Loader2, Calendar } from "lucide-react";
+import { BarChart3, TrendingUp, DollarSign, Wrench, ShoppingCart, Loader2, Calendar, Smartphone, Banknote, CreditCard } from "lucide-react";
 
 type Periodo = "7d" | "30d" | "ano" | "custom";
 
@@ -38,19 +38,18 @@ export default function RelatoriosPage() {
       const isoInicio = dataInicio.toISOString();
       const isoFim = dataFim.toISOString();
 
-      // 1. Busca Vendas PDV (Estas acontecem na hora, então usamos created_at)
+      // 1. Busca Vendas PDV com a forma de pagamento
       const { data: vendas, error: errVendas } = await supabase
         .from("vendas")
-        .select("valor_total, created_at")
+        .select("valor_total, created_at, forma_pagamento")
         .gte("created_at", isoInicio)
         .lte("created_at", isoFim);
       if (errVendas) throw errVendas;
 
-      // 2. Busca Ordens de Serviço (Faturadas)
-      // CORREÇÃO CRÍTICA: Filtra por 'data_finalizacao' e EXIGE status 'entregue'
+      // 2. Busca Ordens de Serviço (Faturadas) com a forma de pagamento
       const { data: ordens, error: errOrdens } = await supabase
         .from("ordens_servico")
-        .select("valor_total, data_finalizacao, status")
+        .select("valor_total, data_finalizacao, status, forma_pagamento")
         .eq("status", "entregue")
         .gte("data_finalizacao", isoInicio)
         .lte("data_finalizacao", isoFim);
@@ -62,6 +61,39 @@ export default function RelatoriosPage() {
       const faturamentoTotal = totalVendas + totalOrdens;
       const qtdTransacoes = (vendas?.length || 0) + (ordens?.length || 0);
       const ticketMedio = qtdTransacoes > 0 ? faturamentoTotal / qtdTransacoes : 0;
+
+      // Acumuladores de Pagamento
+      let totalPix = 0;
+      let totalDinheiro = 0;
+      let totalCredito = 0;
+      let totalDebito = 0;
+
+      const processarPagamento = (forma: string, valorTotal: number) => {
+        if (!forma) return;
+        const f = forma.toLowerCase();
+        
+        if (f === 'pix') totalPix += valorTotal;
+        else if (f === 'dinheiro') totalDinheiro += valorTotal;
+        else if (f === 'cartao_credito' || f === 'credito') totalCredito += valorTotal;
+        else if (f === 'cartao_debito' || f === 'debito') totalDebito += valorTotal;
+        else if (f.includes('misto')) {
+          // Extrai os valores usando Regex da string salva no PDV: "MISTO (Din R$50.00 | PIX R$100.00)"
+          const dinMatch = forma.match(/Din R\$([0-9.]+)/);
+          if (dinMatch) totalDinheiro += parseFloat(dinMatch[1]);
+          
+          const pixMatch = forma.match(/PIX R\$([0-9.]+)/);
+          if (pixMatch) totalPix += parseFloat(pixMatch[1]);
+          
+          const credMatch = forma.match(/Créd R\$([0-9.]+)/);
+          if (credMatch) totalCredito += parseFloat(credMatch[1]);
+          
+          const debMatch = forma.match(/Déb R\$([0-9.]+)/);
+          if (debMatch) totalDebito += parseFloat(debMatch[1]);
+        } else {
+          // Fallback para dinheiro caso seja um formato antigo/desconhecido
+          totalDinheiro += valorTotal;
+        }
+      };
 
       const historicoMap = new Map<string, { data: string; pdv: number; os: number; total: number }>();
       
@@ -86,16 +118,17 @@ export default function RelatoriosPage() {
           historicoMap.get(chave)!.pdv += Number(v.valor_total);
           historicoMap.get(chave)!.total += Number(v.valor_total);
         }
+        processarPagamento(v.forma_pagamento, Number(v.valor_total));
       });
 
       ordens?.forEach(o => {
-        // CORREÇÃO: Coloca a receita no gráfico no dia em que a OS foi ENTREGUE
         if (!o.data_finalizacao) return; 
         const chave = formatador.format(new Date(o.data_finalizacao));
         if (historicoMap.has(chave)) {
           historicoMap.get(chave)!.os += Number(o.valor_total);
           historicoMap.get(chave)!.total += Number(o.valor_total);
         }
+        processarPagamento(o.forma_pagamento, Number(o.valor_total));
       });
 
       return {
@@ -103,6 +136,12 @@ export default function RelatoriosPage() {
           faturamentoTotal, ticketMedio, totalVendas, totalOrdens,
           qtdVendas: vendas?.length || 0,
           qtdOrdens: ordens?.length || 0,
+        },
+        pagamentos: {
+          pix: totalPix,
+          dinheiro: totalDinheiro,
+          credito: totalCredito,
+          debito: totalDebito
         },
         graficoEvolucao: Array.from(historicoMap.values()),
         graficoDistribuicao: [
@@ -117,15 +156,17 @@ export default function RelatoriosPage() {
     return <div className="flex justify-center items-center h-[50vh] text-destructive">Erro ao carregar relatórios financeiros.</div>;
   }
 
-  const { kpis, graficoEvolucao, graficoDistribuicao } = data || { 
-    kpis: { faturamentoTotal: 0, ticketMedio: 0, totalVendas: 0, totalOrdens: 0, qtdVendas: 0, qtdOrdens: 0 }, 
-    graficoEvolucao: [], graficoDistribuicao: [] 
-  };
+ const { 
+    kpis = { faturamentoTotal: 0, ticketMedio: 0, totalVendas: 0, totalOrdens: 0, qtdVendas: 0, qtdOrdens: 0 }, 
+    pagamentos = { pix: 0, dinheiro: 0, credito: 0, debito: 0 },
+    graficoEvolucao = [], 
+    graficoDistribuicao = [] 
+  } = data || {};
 
   return (
-    <div className="flex flex-col gap-6 pb-8">
+    <div className="flex flex-col gap-6 pb-8 animate-in fade-in duration-500">
       {/* Header Premium com Filtros de Data */}
-      <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-4 bg-card p-5 rounded-3xl border border-border/50 shadow-sm">
+      <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-4 bg-card p-6 rounded-3xl border border-border/50 shadow-sm">
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight text-foreground flex items-center gap-3">
             <div className="bg-primary/10 p-2.5 rounded-xl">
@@ -133,45 +174,45 @@ export default function RelatoriosPage() {
             </div>
             Inteligência Financeira
           </h1>
-          <p className="text-muted-foreground mt-1 ml-1">Acompanhe o faturamento real (Vendas e OS Entregues).</p>
+          <p className="text-muted-foreground mt-1 ml-1 font-medium">Acompanhe o faturamento real e a divisão dos seus recebimentos.</p>
         </div>
         
         <div className="flex flex-col sm:flex-row items-end gap-3">
           {periodo === "custom" && (
             <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-4">
               <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">Data Inicial</Label>
+                <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1">Data Inicial</Label>
                 <Input 
                   type="date" 
                   value={dataInicioCustom}
                   onChange={(e) => setDataInicioCustom(e.target.value)}
-                  className="h-12 rounded-xl bg-background border-border/50"
+                  className="h-12 rounded-xl bg-background border-border/60 shadow-sm font-medium"
                 />
               </div>
               <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">Data Final</Label>
+                <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1">Data Final</Label>
                 <Input 
                   type="date" 
                   value={dataFimCustom}
                   onChange={(e) => setDataFimCustom(e.target.value)}
-                  className="h-12 rounded-xl bg-background border-border/50"
+                  className="h-12 rounded-xl bg-background border-border/60 shadow-sm font-medium"
                 />
               </div>
             </div>
           )}
 
           <div className="w-full sm:w-56">
-            <Label className="text-xs text-muted-foreground mb-1.5 block">Período de Análise</Label>
+            <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1 mb-1.5 block">Período de Análise</Label>
             <Select value={periodo} onValueChange={(v) => setPeriodo(v as Periodo)}>
-              <SelectTrigger className="h-12 rounded-xl bg-background border-border/50 shadow-sm font-medium">
+              <SelectTrigger className="h-12 rounded-xl bg-background border-border/60 shadow-sm font-bold text-sm">
                 <Calendar className="h-4 w-4 mr-2 text-primary" />
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="rounded-xl">
-                <SelectItem value="7d">Últimos 7 dias</SelectItem>
-                <SelectItem value="30d">Últimos 30 dias</SelectItem>
-                <SelectItem value="ano">Últimos 12 meses</SelectItem>
-                <SelectItem value="custom" className="font-semibold text-primary">Personalizado...</SelectItem>
+              <SelectContent className="rounded-xl border-border/50">
+                <SelectItem value="7d" className="font-medium">Últimos 7 dias</SelectItem>
+                <SelectItem value="30d" className="font-medium">Últimos 30 dias</SelectItem>
+                <SelectItem value="ano" className="font-medium">Últimos 12 meses</SelectItem>
+                <SelectItem value="custom" className="font-bold text-primary">Personalizado...</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -184,66 +225,116 @@ export default function RelatoriosPage() {
         </div>
       ) : (
         <>
-          {/* Linha 1: KPIs (Key Performance Indicators) */}
+          {/* Linha 1: KPIs Principais */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Card className="rounded-3xl border-none shadow-md bg-gradient-to-br from-primary to-primary/80 text-primary-foreground">
               <CardContent className="p-6">
                 <div className="flex justify-between items-start">
                   <div className="space-y-2">
-                    <p className="text-primary-foreground/80 font-medium text-sm">Receita Líquida Real</p>
-                    <p className="text-3xl font-black tracking-tight">R$ {kpis.faturamentoTotal.toFixed(2)}</p>
+                    <p className="text-primary-foreground/80 font-bold text-xs uppercase tracking-wider">Receita Líquida Real</p>
+                    <p className="text-3xl font-black tracking-tight font-mono">R$ {kpis.faturamentoTotal.toFixed(2)}</p>
                   </div>
-                  <div className="bg-primary-foreground/20 p-2 rounded-xl"><DollarSign className="h-6 w-6" /></div>
+                  <div className="bg-primary-foreground/20 p-2.5 rounded-2xl"><DollarSign className="h-6 w-6" /></div>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="rounded-3xl border-border/50 shadow-sm hover:shadow-md transition-shadow bg-card">
+            <Card className="rounded-3xl border-border/40 shadow-sm hover:shadow-md transition-shadow bg-card/80 backdrop-blur-sm">
               <CardContent className="p-6">
                 <div className="flex justify-between items-start">
                   <div className="space-y-2">
-                    <p className="text-muted-foreground font-medium text-sm">Ticket Médio</p>
-                    <p className="text-2xl font-bold tracking-tight text-foreground">R$ {kpis.ticketMedio.toFixed(2)}</p>
+                    <p className="text-muted-foreground font-bold text-xs uppercase tracking-wider">Ticket Médio</p>
+                    <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {kpis.ticketMedio.toFixed(2)}</p>
                   </div>
-                  <div className="bg-primary/10 p-2 rounded-xl"><TrendingUp className="h-6 w-6 text-primary" /></div>
+                  <div className="bg-primary/10 p-2.5 rounded-2xl"><TrendingUp className="h-6 w-6 text-primary" /></div>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="rounded-3xl border-border/50 shadow-sm hover:shadow-md transition-shadow bg-card">
+            <Card className="rounded-3xl border-border/40 shadow-sm hover:shadow-md transition-shadow bg-card/80 backdrop-blur-sm">
               <CardContent className="p-6">
                 <div className="flex justify-between items-start">
                   <div className="space-y-2">
-                    <p className="text-muted-foreground font-medium text-sm">OS Entregues</p>
-                    <p className="text-2xl font-bold tracking-tight text-foreground">R$ {kpis.totalOrdens.toFixed(2)}</p>
-                    <p className="text-xs font-medium text-muted-foreground/70">{kpis.qtdOrdens} ordens finalizadas</p>
+                    <p className="text-muted-foreground font-bold text-xs uppercase tracking-wider">OS Entregues</p>
+                    <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {kpis.totalOrdens.toFixed(2)}</p>
+                    <p className="text-[10px] font-bold uppercase text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-md w-fit">{kpis.qtdOrdens} ordens finalizadas</p>
                   </div>
-                  <div className="bg-amber-500/10 p-2 rounded-xl"><Wrench className="h-6 w-6 text-amber-500" /></div>
+                  <div className="bg-amber-500/10 p-2.5 rounded-2xl"><Wrench className="h-6 w-6 text-amber-500" /></div>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="rounded-3xl border-border/50 shadow-sm hover:shadow-md transition-shadow bg-card">
+            <Card className="rounded-3xl border-border/40 shadow-sm hover:shadow-md transition-shadow bg-card/80 backdrop-blur-sm">
               <CardContent className="p-6">
                 <div className="flex justify-between items-start">
                   <div className="space-y-2">
-                    <p className="text-muted-foreground font-medium text-sm">Vendas Balcão</p>
-                    <p className="text-2xl font-bold tracking-tight text-foreground">R$ {kpis.totalVendas.toFixed(2)}</p>
-                    <p className="text-xs font-medium text-muted-foreground/70">{kpis.qtdVendas} PDVs finalizados</p>
+                    <p className="text-muted-foreground font-bold text-xs uppercase tracking-wider">Vendas Balcão</p>
+                    <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {kpis.totalVendas.toFixed(2)}</p>
+                    <p className="text-[10px] font-bold uppercase text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-md w-fit">{kpis.qtdVendas} vendas PDV</p>
                   </div>
-                  <div className="bg-emerald-500/10 p-2 rounded-xl"><ShoppingCart className="h-6 w-6 text-emerald-500" /></div>
+                  <div className="bg-emerald-500/10 p-2.5 rounded-2xl"><ShoppingCart className="h-6 w-6 text-emerald-500" /></div>
                 </div>
               </CardContent>
             </Card>
           </div>
 
-          {/* Linha 2: Gráficos Detalhados */}
+          {/* NOVA LINHA: Detalhamento por Forma de Pagamento */}
+          <div>
+            <h2 className="text-lg font-black tracking-tight text-foreground mb-3 ml-2 flex items-center gap-2">
+              Detalhamento de Recebimentos
+            </h2>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              
+              <Card className="rounded-3xl border-teal-500/20 shadow-sm bg-gradient-to-br from-card to-teal-500/5 hover:border-teal-500/40 transition-colors">
+                <CardContent className="p-5">
+                  <div className="flex justify-between items-center mb-1">
+                    <p className="text-teal-600 font-bold text-[10px] uppercase tracking-widest">PIX</p>
+                    <div className="bg-teal-500/10 p-2 rounded-xl"><Smartphone className="h-4 w-4 text-teal-600" /></div>
+                  </div>
+                  <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {pagamentos.pix.toFixed(2)}</p>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-emerald-500/20 shadow-sm bg-gradient-to-br from-card to-emerald-500/5 hover:border-emerald-500/40 transition-colors">
+                <CardContent className="p-5">
+                  <div className="flex justify-between items-center mb-1">
+                    <p className="text-emerald-600 font-bold text-[10px] uppercase tracking-widest">Dinheiro</p>
+                    <div className="bg-emerald-500/10 p-2 rounded-xl"><Banknote className="h-4 w-4 text-emerald-600" /></div>
+                  </div>
+                  <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {pagamentos.dinheiro.toFixed(2)}</p>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-indigo-500/20 shadow-sm bg-gradient-to-br from-card to-indigo-500/5 hover:border-indigo-500/40 transition-colors">
+                <CardContent className="p-5">
+                  <div className="flex justify-between items-center mb-1">
+                    <p className="text-indigo-600 font-bold text-[10px] uppercase tracking-widest">Crédito</p>
+                    <div className="bg-indigo-500/10 p-2 rounded-xl"><CreditCard className="h-4 w-4 text-indigo-600" /></div>
+                  </div>
+                  <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {pagamentos.credito.toFixed(2)}</p>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-orange-500/20 shadow-sm bg-gradient-to-br from-card to-orange-500/5 hover:border-orange-500/40 transition-colors">
+                <CardContent className="p-5">
+                  <div className="flex justify-between items-center mb-1">
+                    <p className="text-orange-600 font-bold text-[10px] uppercase tracking-widest">Débito</p>
+                    <div className="bg-orange-500/10 p-2 rounded-xl"><CreditCard className="h-4 w-4 text-orange-600" /></div>
+                  </div>
+                  <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {pagamentos.debito.toFixed(2)}</p>
+                </CardContent>
+              </Card>
+
+            </div>
+          </div>
+
+          {/* Linha 3: Gráficos Detalhados */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
             {/* Gráfico Principal: Evolução de Receita */}
-            <Card className="lg:col-span-2 rounded-3xl border-border/50 shadow-sm bg-card">
-              <CardHeader className="border-b border-border/40 pb-4 px-6 pt-6">
-                <CardTitle className="text-lg font-bold">Evolução de Entradas (Caixa)</CardTitle>
+            <Card className="lg:col-span-2 rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm">
+              <CardHeader className="border-b border-border/30 pb-4 px-6 pt-6">
+                <CardTitle className="text-lg font-black">Evolução de Entradas (Caixa)</CardTitle>
               </CardHeader>
               <CardContent className="p-6 pt-6">
                 <div className="h-[300px] w-full">
@@ -256,12 +347,12 @@ export default function RelatoriosPage() {
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.5} />
-                      <XAxis dataKey="data" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }} dy={10} />
-                      <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(value) => `R$${value}`} />
+                      <XAxis dataKey="data" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))', fontWeight: 600 }} dy={10} />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))', fontWeight: 600 }} tickFormatter={(value) => `R$${value}`} />
                       <Tooltip 
-                        contentStyle={{ borderRadius: '16px', border: '1px solid hsl(var(--border))', boxShadow: '0 10px 40px -10px rgba(0,0,0,0.1)' }}
+                        contentStyle={{ borderRadius: '16px', border: '1px solid hsl(var(--border))', boxShadow: '0 10px 40px -10px rgba(0,0,0,0.1)', backgroundColor: 'hsl(var(--card))' }}
                         formatter={(value: number) => [`R$ ${value.toFixed(2)}`, "Entrada R$"]}
-                        labelStyle={{ fontWeight: 'bold', color: 'hsl(var(--foreground))', marginBottom: '4px' }}
+                        labelStyle={{ fontWeight: '900', color: 'hsl(var(--foreground))', marginBottom: '4px' }}
                       />
                       <Area type="monotone" dataKey="total" stroke="hsl(var(--primary))" strokeWidth={4} fillOpacity={1} fill="url(#colorTotal)" />
                     </AreaChart>
@@ -271,16 +362,16 @@ export default function RelatoriosPage() {
             </Card>
 
             {/* Gráfico Secundário: Distribuição de Receita */}
-            <Card className="rounded-3xl border-border/50 shadow-sm bg-card flex flex-col">
-              <CardHeader className="border-b border-border/40 pb-4 px-6 pt-6">
-                <CardTitle className="text-lg font-bold">Origem das Receitas</CardTitle>
+            <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm flex flex-col">
+              <CardHeader className="border-b border-border/30 pb-4 px-6 pt-6">
+                <CardTitle className="text-lg font-black">Origem das Receitas</CardTitle>
               </CardHeader>
               <CardContent className="p-6 flex-1 flex flex-col justify-center items-center">
                 {kpis.faturamentoTotal === 0 ? (
                   <div className="text-center text-muted-foreground space-y-2">
                     <BarChart3 className="h-12 w-12 mx-auto opacity-20" />
-                    <p className="font-medium">Sem faturamento no período</p>
-                    <p className="text-sm opacity-70">Nenhuma venda ou OS finalizada.</p>
+                    <p className="font-bold">Sem faturamento no período</p>
+                    <p className="text-xs font-medium opacity-70">Nenhuma venda ou OS finalizada.</p>
                   </div>
                 ) : (
                   <div className="h-[250px] w-full">
@@ -303,9 +394,9 @@ export default function RelatoriosPage() {
                         </Pie>
                         <Tooltip 
                           formatter={(value: number) => [`R$ ${value.toFixed(2)}`, "Valor"]}
-                          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 40px -10px rgba(0,0,0,0.1)' }}
+                          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 40px -10px rgba(0,0,0,0.1)', fontWeight: 'bold' }}
                         />
-                        <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                        <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 600 }} />
                       </PieChart>
                     </ResponsiveContainer>
                   </div>

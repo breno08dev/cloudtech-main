@@ -10,7 +10,9 @@ import {
   PlusCircle,
   List,
   LogOut,
-  Banknote // Novo ícone para o Financeiro
+  Banknote,
+  PanelLeftClose, // <-- Ícone novo
+  PanelLeft       // <-- Ícone novo
 } from "lucide-react";
 import {
   Sidebar,
@@ -28,10 +30,14 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 export function AppSidebar() {
   const location = useLocation();
-  const { setOpenMobile } = useSidebar();
+  const { setOpenMobile, toggleSidebar, state } = useSidebar(); // <-- Adicionado toggleSidebar e state
+  
+  const isCollapsed = state === "collapsed"; // <-- Verifica se está minimizado
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -49,45 +55,43 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar className="border-r border-border/40 bg-sidebar/95 backdrop-blur-xl shadow-sm print:hidden">
+    
+    <Sidebar collapsible="icon" className="border-r border-border/40 bg-sidebar/95 backdrop-blur-xl shadow-sm print:hidden transition-all duration-300">
       
-      <SidebarHeader className="p-6 border-b border-border/30 flex items-center justify-center">
-        <Link to="/" onClick={handleLinkClick} className="w-full flex justify-center transition-transform hover:scale-105 duration-300">
-          <img
-            src="/conectnewlogo.png"
-            alt="Conect New"
-            className="max-h-28 w-auto object-contain drop-shadow-md dark:brightness-110"
-            onError={(e) => {
-              e.currentTarget.style.display = 'none';
-              e.currentTarget.parentElement?.insertAdjacentHTML('beforeend', '<span class="font-black text-xl text-primary uppercase tracking-widest">Conect New</span>');
-            }}
-          />
-        </Link>
+      <SidebarHeader className={cn("p-4 border-b border-border/30 flex transition-all", isCollapsed ? "justify-center items-center" : "justify-between items-center flex-row")}>
+        {!isCollapsed && (
+          <Link to="/" onClick={handleLinkClick} className="flex justify-center transition-transform hover:scale-105 duration-300 overflow-hidden">
+            <img
+              src="/conectnewlogo.png"
+              alt="Conect New"
+              className="max-h-22 w-auto object-contain drop-shadow-md dark:brightness-110"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                e.currentTarget.parentElement?.insertAdjacentHTML('beforeend', '<span class="font-black text-xl text-primary uppercase tracking-widest">Conect New</span>');
+              }}
+            />
+          </Link>
+        )}
+        
+       
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          onClick={toggleSidebar} 
+          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted/50"
+          title={isCollapsed ? "Expandir Menu" : "Minimizar Menu"}
+        >
+          {isCollapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+        </Button>
       </SidebarHeader>
 
-      <SidebarContent className="p-3 space-y-6 mt-2 scrollbar-thin flex flex-col h-full">
+      <SidebarContent className="p-2 space-y-6 mt-2 scrollbar-thin flex flex-col h-full">
 
         <div className="flex-1 space-y-6">
-          {/* GRUPO 1: VISÃO GERAL */}
+          
+          {/* GRUPO 1: ATENDIMENTO */}
           <SidebarGroup>
-            <SidebarGroupLabel className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-bold ml-1 mb-2">Visão Geral</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={isActive("/")} tooltip="Dashboard" className="font-medium transition-all hover:bg-primary/5">
-                    <Link to="/" onClick={handleLinkClick}>
-                      <Home className="h-4 w-4" />
-                      <span>Dashboard Inicial</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-
-          {/* GRUPO 2: ATENDIMENTO */}
-          <SidebarGroup>
-            <SidebarGroupLabel className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-bold ml-1 mb-2">Atendimento</SidebarGroupLabel>
+            <SidebarGroupLabel className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-bold ml-1 mb-2 group-data-[collapsible=icon]:hidden">Atendimento</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
@@ -95,7 +99,7 @@ export function AppSidebar() {
                     <Wrench className="h-4 w-4 text-amber-500" />
                     <span>Ordens de Serviço</span>
                   </SidebarMenuButton>
-                  <SidebarMenuSub>
+                  <SidebarMenuSub className="group-data-[collapsible=icon]:hidden">
                     <SidebarMenuSubItem>
                       <SidebarMenuSubButton asChild isActive={isActive("/ordens/nova")} className="font-medium">
                         <Link to="/ordens/nova" onClick={handleLinkClick}>
@@ -113,7 +117,7 @@ export function AppSidebar() {
                   </SidebarMenuSub>
                 </SidebarMenuItem>
 
-                <SidebarMenuItem className="mt-2">
+                <SidebarMenuItem className="mt-2 group-data-[collapsible=icon]:mt-0">
                   <SidebarMenuButton asChild isActive={isActive("/vendas")} tooltip="PDV / Vendas" className="font-medium hover:bg-primary/5">
                     <Link to="/vendas" onClick={handleLinkClick}>
                       <ShoppingCart className="h-4 w-4 text-emerald-500" />
@@ -125,21 +129,13 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
 
-          {/* GRUPO 3: CADASTROS */}
+          {/* GRUPO 2: CADASTROS */}
           <SidebarGroup>
-            <SidebarGroupLabel className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-bold ml-1 mb-2">Cadastros & Gestão</SidebarGroupLabel>
+            <SidebarGroupLabel className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-bold ml-1 mb-2 group-data-[collapsible=icon]:hidden">Cadastros</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={isActive("/produtos")} tooltip="Estoque" className="font-medium hover:bg-primary/5">
-                    <Link to="/produtos" onClick={handleLinkClick}>
-                      <Package className="h-4 w-4 text-indigo-500" />
-                      <span>Produtos & Estoque</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={isActive("/clientes")} tooltip="Clientes" className="font-medium mt-1 hover:bg-primary/5">
+                  <SidebarMenuButton asChild isActive={isActive("/clientes")} tooltip="Clientes" className="font-medium hover:bg-primary/5">
                     <Link to="/clientes" onClick={handleLinkClick}>
                       <Users className="h-4 w-4 text-blue-500" />
                       <span>Gestão de Clientes</span>
@@ -150,24 +146,41 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
 
-          {/* GRUPO 4: ADMINISTRAÇÃO */}
+          {/* GRUPO 3: ADMINISTRAÇÃO */}
           <SidebarGroup>
-            <SidebarGroupLabel className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-bold ml-1 mb-2">Administração</SidebarGroupLabel>
+            <SidebarGroupLabel className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-bold ml-1 mb-2 group-data-[collapsible=icon]:hidden">Administração</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 
-                {/* NOVO MENU: GESTÃO FINANCEIRA */}
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={isActive("/financeiro")} tooltip="Financeiro" className="font-medium hover:bg-primary/5">
-                    <Link to="/financeiro" onClick={handleLinkClick}>
-                      <Banknote className="h-4 w-4 text-emerald-500" />
-                      <span>Gestão Financeira</span>
+                  <SidebarMenuButton asChild isActive={isActive("/")} tooltip="Dashboard Inicial" className="font-medium hover:bg-primary/5">
+                    <Link to="/" onClick={handleLinkClick}>
+                      <Home className="h-4 w-4 text-sky-500" />
+                      <span>Dashboard Inicial</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
 
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={isActive("/relatorios")} tooltip="Relatórios" className="font-medium mt-1 hover:bg-primary/5">
+                  <SidebarMenuButton asChild isActive={isActive("/produtos")} tooltip="Estoque" className="font-medium mt-1 hover:bg-primary/5 group-data-[collapsible=icon]:mt-0">
+                    <Link to="/produtos" onClick={handleLinkClick}>
+                      <Package className="h-4 w-4 text-indigo-500" />
+                      <span>Produtos & Estoque</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={isActive("/financeiro")} tooltip="Financeiro" className="font-medium mt-1 hover:bg-primary/5 group-data-[collapsible=icon]:mt-0">
+                    <Link to="/financeiro" onClick={handleLinkClick}>
+                      <Banknote className="h-4 w-4 text-emerald-500" />
+                      <span>Gestão Diária</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={isActive("/relatorios")} tooltip="Relatórios" className="font-medium mt-1 hover:bg-primary/5 group-data-[collapsible=icon]:mt-0">
                     <Link to="/relatorios" onClick={handleLinkClick}>
                       <Wallet className="h-4 w-4 text-purple-500" />
                       <span>Inteligência Financeira</span>
@@ -176,7 +189,7 @@ export function AppSidebar() {
                 </SidebarMenuItem>
                 
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={isActive("/configuracoes")} tooltip="Configurações" className="font-medium mt-1 hover:bg-primary/5">
+                  <SidebarMenuButton asChild isActive={isActive("/configuracoes")} tooltip="Configurações" className="font-medium mt-1 hover:bg-primary/5 group-data-[collapsible=icon]:mt-0">
                     <Link to="/configuracoes" onClick={handleLinkClick}>
                       <Settings className="h-4 w-4 text-slate-500" />
                       <span>Configurações da Loja</span>

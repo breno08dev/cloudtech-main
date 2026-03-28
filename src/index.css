@@ -63,6 +63,44 @@
     --chart-5: 0 84% 60%;
   }
 
+  * {
+    @apply border-border;
+    /* Adiciona suporte para Firefox */
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  /* ==========================================
+     CUSTOMIZAÇÃO DA BARRA DE ROLAGEM (SCROLL)
+     ========================================== */
+  
+  /* Largura e altura da barra */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  /* Fundo da barra (trilho) */
+  ::-webkit-scrollbar-track {
+    background: transparent; 
+  }
+
+  /* A barrinha que se move (thumb) */
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border)); 
+    border-radius: 10px;
+  }
+
+  /* Cor ao passar o rato por cima da barrinha */
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground)); 
+  }
+
+
   .dark {
     /* Tema Escuro Premium (Tons profundos de ardósia/slate) */
     --background: 240 10% 3.9%;

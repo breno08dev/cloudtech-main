@@ -12,7 +12,7 @@ export default function PasswordGate({ children }: { children: React.ReactNode }
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (password === "123") {
+    if (password === "911723") {
       setIsAuthenticated(true);
       toast.success("Acesso autorizado!");
     } else {
@@ -40,14 +40,22 @@ export default function PasswordGate({ children }: { children: React.ReactNode }
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-5">
             <div className="space-y-2">
-              <Input
-                type="password"
-                placeholder="Introduza a senha..."
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="h-14 text-center text-xl tracking-[0.3em] font-bold rounded-2xl bg-background border-border/60"
-                autoFocus
-              />
+              <Input 
+  type="password" 
+  placeholder="Digite a senha de administrador..." 
+  value={password} 
+  onChange={(e) => setPassword(e.target.value)}
+  onKeyDown={(e) => {
+    if (e.key === 'Enter') {
+       // chame a sua função de validar a senha aqui (ex: handleUnlock())
+    }
+  }}
+  autoComplete="new-password"   // <-- Isso engana o Chrome
+  name="admin_gate_key"         // <-- Tira o nome padrão de "password"
+  id="admin_gate_key"
+  data-lpignore="true"          // <-- Ignora LastPass e outros gerenciadores
+  className="h-12 rounded-xl border-border/60 text-center text-lg tracking-widest shadow-sm focus-visible:ring-primary"
+/>
             </div>
             <Button type="submit" className="w-full h-14 rounded-xl font-bold text-base shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all">
               Desbloquear Acesso
