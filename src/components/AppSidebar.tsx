@@ -11,8 +11,9 @@ import {
   List,
   LogOut,
   Banknote,
-  PanelLeftClose, // <-- Ícone novo
-  PanelLeft       // <-- Ícone novo
+  PanelLeftClose,
+  PanelLeft,
+  BookOpenCheck // <-- Ícone novo para o crediário
 } from "lucide-react";
 import {
   Sidebar,
@@ -35,9 +36,9 @@ import { Button } from "@/components/ui/button";
 
 export function AppSidebar() {
   const location = useLocation();
-  const { setOpenMobile, toggleSidebar, state } = useSidebar(); // <-- Adicionado toggleSidebar e state
+  const { setOpenMobile, toggleSidebar, state } = useSidebar();
   
-  const isCollapsed = state === "collapsed"; // <-- Verifica se está minimizado
+  const isCollapsed = state === "collapsed";
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -55,7 +56,6 @@ export function AppSidebar() {
   };
 
   return (
-    
     <Sidebar collapsible="icon" className="border-r border-border/40 bg-sidebar/95 backdrop-blur-xl shadow-sm print:hidden transition-all duration-300">
       
       <SidebarHeader className={cn("p-4 border-b border-border/30 flex transition-all", isCollapsed ? "justify-center items-center" : "justify-between items-center flex-row")}>
@@ -73,7 +73,6 @@ export function AppSidebar() {
           </Link>
         )}
         
-       
         <Button 
           variant="ghost" 
           size="icon" 
@@ -142,6 +141,18 @@ export function AppSidebar() {
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
+
+                {/* NOVO MENU DE CREDIÁRIO AQUI */}
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={isActive("/crediario")} tooltip="Crediário" className="font-medium mt-1 hover:bg-primary/5 group-data-[collapsible=icon]:mt-0">
+                    <Link to="/crediario" onClick={handleLinkClick}>
+                      <BookOpenCheck className="h-4 w-4 text-orange-500" />
+                      <span>Crediário</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                {/* FIM NOVO MENU DE CREDIÁRIO */}
+
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

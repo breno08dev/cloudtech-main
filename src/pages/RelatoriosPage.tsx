@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell, Legend } from "recharts";
-import { BarChart3, TrendingUp, DollarSign, Wrench, ShoppingCart, Loader2, Calendar, Smartphone, Banknote, CreditCard } from "lucide-react";
+import { BarChart3, TrendingUp, DollarSign, Wrench, ShoppingCart, Loader2, Calendar, Smartphone, Banknote, CreditCard, BookOpenCheck } from "lucide-react";
 
 type Periodo = "7d" | "30d" | "ano" | "custom";
 
@@ -18,7 +18,8 @@ export default function RelatoriosPage() {
   const [dataFimCustom, setDataFimCustom] = useState<string>(hojeFormatoInput);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["relatorios_financeiros", periodo, dataInicioCustom, dataFimCustom],
+    // CHAVE ATUALIZADA AQUI PARA IGNORAR O CACHE ANTIGO
+    queryKey: ["relatorios_financeiros_v2", periodo, dataInicioCustom, dataFimCustom],
     queryFn: async () => {
       let dataInicio = new Date();
       let dataFim = new Date(); 
@@ -38,7 +39,6 @@ export default function RelatoriosPage() {
       const isoInicio = dataInicio.toISOString();
       const isoFim = dataFim.toISOString();
 
-      // 1. Busca Vendas PDV com a forma de pagamento
       const { data: vendas, error: errVendas } = await supabase
         .from("vendas")
         .select("valor_total, created_at, forma_pagamento")
@@ -46,7 +46,6 @@ export default function RelatoriosPage() {
         .lte("created_at", isoFim);
       if (errVendas) throw errVendas;
 
-      // 2. Busca Ordens de Serviço (Faturadas) com a forma de pagamento
       const { data: ordens, error: errOrdens } = await supabase
         .from("ordens_servico")
         .select("valor_total, data_finalizacao, status, forma_pagamento")
@@ -55,14 +54,22 @@ export default function RelatoriosPage() {
         .lte("data_finalizacao", isoFim);
       if (errOrdens) throw errOrdens;
 
-      // --- PROCESSAMENTO DOS DADOS ---
-      const totalVendas = (vendas || []).reduce((acc, v) => acc + Number(v.valor_total), 0);
-      const totalOrdens = (ordens || []).reduce((acc, o) => acc + Number(o.valor_total), 0);
-      const faturamentoTotal = totalVendas + totalOrdens;
-      const qtdTransacoes = (vendas?.length || 0) + (ordens?.length || 0);
-      const ticketMedio = qtdTransacoes > 0 ? faturamentoTotal / qtdTransacoes : 0;
+      const { data: parcelasPagas, error: errParcelas } = await supabase
+        .from("crediario_parcelas")
+        .select("valor_parcela, data_pagamento, forma_pagamento")
+        .eq("status_pagamento", "pago")
+        .gte("data_pagamento", isoInicio)
+        .lte("data_pagamento", isoFim);
+      if (errParcelas) throw errParcelas;
 
-      // Acumuladores de Pagamento
+      let totalVendas = 0;
+      let totalOrdens = 0;
+      let totalCrediarioRecebido = 0;
+
+      let qtdVendas = 0;
+      let qtdOrdens = 0;
+      let qtdParcelas = 0;
+
       let totalPix = 0;
       let totalDinheiro = 0;
       let totalCredito = 0;
@@ -77,20 +84,15 @@ export default function RelatoriosPage() {
         else if (f === 'cartao_credito' || f === 'credito') totalCredito += valorTotal;
         else if (f === 'cartao_debito' || f === 'debito') totalDebito += valorTotal;
         else if (f.includes('misto')) {
-          // Extrai os valores usando Regex da string salva no PDV: "MISTO (Din R$50.00 | PIX R$100.00)"
           const dinMatch = forma.match(/Din R\$([0-9.]+)/);
           if (dinMatch) totalDinheiro += parseFloat(dinMatch[1]);
-          
           const pixMatch = forma.match(/PIX R\$([0-9.]+)/);
           if (pixMatch) totalPix += parseFloat(pixMatch[1]);
-          
           const credMatch = forma.match(/Créd R\$([0-9.]+)/);
           if (credMatch) totalCredito += parseFloat(credMatch[1]);
-          
           const debMatch = forma.match(/Déb R\$([0-9.]+)/);
           if (debMatch) totalDebito += parseFloat(debMatch[1]);
         } else {
-          // Fallback para dinheiro caso seja um formato antigo/desconhecido
           totalDinheiro += valorTotal;
         }
       };
@@ -113,29 +115,48 @@ export default function RelatoriosPage() {
       }
 
       vendas?.forEach(v => {
+        if (v.forma_pagamento === 'crediario') return;
+        totalVendas += Number(v.valor_total);
+        qtdVendas++;
+        processarPagamento(v.forma_pagamento, Number(v.valor_total));
         const chave = formatador.format(new Date(v.created_at));
         if (historicoMap.has(chave)) {
           historicoMap.get(chave)!.pdv += Number(v.valor_total);
           historicoMap.get(chave)!.total += Number(v.valor_total);
         }
-        processarPagamento(v.forma_pagamento, Number(v.valor_total));
       });
 
       ordens?.forEach(o => {
-        if (!o.data_finalizacao) return; 
+        if (o.forma_pagamento === 'crediario' || !o.data_finalizacao) return;
+        totalOrdens += Number(o.valor_total);
+        qtdOrdens++;
+        processarPagamento(o.forma_pagamento, Number(o.valor_total));
         const chave = formatador.format(new Date(o.data_finalizacao));
         if (historicoMap.has(chave)) {
           historicoMap.get(chave)!.os += Number(o.valor_total);
           historicoMap.get(chave)!.total += Number(o.valor_total);
         }
-        processarPagamento(o.forma_pagamento, Number(o.valor_total));
       });
+
+      parcelasPagas?.forEach(p => {
+        if (!p.data_pagamento) return;
+        totalCrediarioRecebido += Number(p.valor_parcela);
+        qtdParcelas++;
+        processarPagamento(p.forma_pagamento, Number(p.valor_parcela));
+        const chave = formatador.format(new Date(p.data_pagamento));
+        if (historicoMap.has(chave)) {
+          historicoMap.get(chave)!.total += Number(p.valor_parcela);
+        }
+      });
+
+      const faturamentoTotal = totalVendas + totalOrdens + totalCrediarioRecebido;
+      const qtdTransacoes = qtdVendas + qtdOrdens + qtdParcelas;
+      const ticketMedio = qtdTransacoes > 0 ? faturamentoTotal / qtdTransacoes : 0;
 
       return {
         kpis: {
-          faturamentoTotal, ticketMedio, totalVendas, totalOrdens,
-          qtdVendas: vendas?.length || 0,
-          qtdOrdens: ordens?.length || 0,
+          faturamentoTotal, ticketMedio, totalVendas, totalOrdens, totalCrediarioRecebido,
+          qtdVendas, qtdOrdens, qtdParcelas
         },
         pagamentos: {
           pix: totalPix,
@@ -145,8 +166,9 @@ export default function RelatoriosPage() {
         },
         graficoEvolucao: Array.from(historicoMap.values()),
         graficoDistribuicao: [
-          { name: "Vendas Balcão (PDV)", value: totalVendas, color: "hsl(var(--chart-1))" },
-          { name: "Serviços (OS)", value: totalOrdens, color: "hsl(var(--chart-2))" },
+          { name: "Vendas (À Vista)", value: totalVendas, color: "hsl(var(--chart-1))" },
+          { name: "OS (À Vista)", value: totalOrdens, color: "hsl(var(--chart-2))" },
+          { name: "Crediário Recebido", value: totalCrediarioRecebido, color: "#f97316" },
         ]
       };
     }
@@ -157,7 +179,7 @@ export default function RelatoriosPage() {
   }
 
  const { 
-    kpis = { faturamentoTotal: 0, ticketMedio: 0, totalVendas: 0, totalOrdens: 0, qtdVendas: 0, qtdOrdens: 0 }, 
+    kpis = { faturamentoTotal: 0, ticketMedio: 0, totalVendas: 0, totalOrdens: 0, totalCrediarioRecebido: 0, qtdVendas: 0, qtdOrdens: 0, qtdParcelas: 0 }, 
     pagamentos = { pix: 0, dinheiro: 0, credito: 0, debito: 0 },
     graficoEvolucao = [], 
     graficoDistribuicao = [] 
@@ -225,14 +247,14 @@ export default function RelatoriosPage() {
         </div>
       ) : (
         <>
-          {/* Linha 1: KPIs Principais */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Linha 1: KPIs Principais COM PROTEÇÃO Number(x || 0) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 lg:grid-cols-3 gap-4">
             <Card className="rounded-3xl border-none shadow-md bg-gradient-to-br from-primary to-primary/80 text-primary-foreground">
               <CardContent className="p-6">
                 <div className="flex justify-between items-start">
                   <div className="space-y-2">
                     <p className="text-primary-foreground/80 font-bold text-xs uppercase tracking-wider">Receita Líquida Real</p>
-                    <p className="text-3xl font-black tracking-tight font-mono">R$ {kpis.faturamentoTotal.toFixed(2)}</p>
+                    <p className="text-3xl font-black tracking-tight font-mono">R$ {Number(kpis.faturamentoTotal || 0).toFixed(2)}</p>
                   </div>
                   <div className="bg-primary-foreground/20 p-2.5 rounded-2xl"><DollarSign className="h-6 w-6" /></div>
                 </div>
@@ -244,7 +266,7 @@ export default function RelatoriosPage() {
                 <div className="flex justify-between items-start">
                   <div className="space-y-2">
                     <p className="text-muted-foreground font-bold text-xs uppercase tracking-wider">Ticket Médio</p>
-                    <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {kpis.ticketMedio.toFixed(2)}</p>
+                    <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {Number(kpis.ticketMedio || 0).toFixed(2)}</p>
                   </div>
                   <div className="bg-primary/10 p-2.5 rounded-2xl"><TrendingUp className="h-6 w-6 text-primary" /></div>
                 </div>
@@ -255,9 +277,9 @@ export default function RelatoriosPage() {
               <CardContent className="p-6">
                 <div className="flex justify-between items-start">
                   <div className="space-y-2">
-                    <p className="text-muted-foreground font-bold text-xs uppercase tracking-wider">OS Entregues</p>
-                    <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {kpis.totalOrdens.toFixed(2)}</p>
-                    <p className="text-[10px] font-bold uppercase text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-md w-fit">{kpis.qtdOrdens} ordens finalizadas</p>
+                    <p className="text-muted-foreground font-bold text-[11px] uppercase tracking-wider">OS (À Vista)</p>
+                    <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {Number(kpis.totalOrdens || 0).toFixed(2)}</p>
+                    <p className="text-[10px] font-bold uppercase text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-md w-fit">{kpis.qtdOrdens || 0} ordens</p>
                   </div>
                   <div className="bg-amber-500/10 p-2.5 rounded-2xl"><Wrench className="h-6 w-6 text-amber-500" /></div>
                 </div>
@@ -268,11 +290,24 @@ export default function RelatoriosPage() {
               <CardContent className="p-6">
                 <div className="flex justify-between items-start">
                   <div className="space-y-2">
-                    <p className="text-muted-foreground font-bold text-xs uppercase tracking-wider">Vendas Balcão</p>
-                    <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {kpis.totalVendas.toFixed(2)}</p>
-                    <p className="text-[10px] font-bold uppercase text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-md w-fit">{kpis.qtdVendas} vendas PDV</p>
+                    <p className="text-muted-foreground font-bold text-[11px] uppercase tracking-wider">Vendas (À Vista)</p>
+                    <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {Number(kpis.totalVendas || 0).toFixed(2)}</p>
+                    <p className="text-[10px] font-bold uppercase text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-md w-fit">{kpis.qtdVendas || 0} vendas</p>
                   </div>
                   <div className="bg-emerald-500/10 p-2.5 rounded-2xl"><ShoppingCart className="h-6 w-6 text-emerald-500" /></div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-border/40 shadow-sm hover:shadow-md transition-shadow bg-card/80 backdrop-blur-sm">
+              <CardContent className="p-6">
+                <div className="flex justify-between items-start">
+                  <div className="space-y-2">
+                    <p className="text-muted-foreground font-bold text-[11px] uppercase tracking-wider">Fiado Recebido</p>
+                    <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {Number(kpis.totalCrediarioRecebido || 0).toFixed(2)}</p>
+                    <p className="text-[10px] font-bold uppercase text-orange-500 bg-orange-500/10 px-2 py-0.5 rounded-md w-fit">{kpis.qtdParcelas || 0} parcelas</p>
+                  </div>
+                  <div className="bg-orange-500/10 p-2.5 rounded-2xl"><BookOpenCheck className="h-6 w-6 text-orange-500" /></div>
                 </div>
               </CardContent>
             </Card>
@@ -291,7 +326,7 @@ export default function RelatoriosPage() {
                     <p className="text-teal-600 font-bold text-[10px] uppercase tracking-widest">PIX</p>
                     <div className="bg-teal-500/10 p-2 rounded-xl"><Smartphone className="h-4 w-4 text-teal-600" /></div>
                   </div>
-                  <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {pagamentos.pix.toFixed(2)}</p>
+                  <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {Number(pagamentos.pix || 0).toFixed(2)}</p>
                 </CardContent>
               </Card>
 
@@ -301,7 +336,7 @@ export default function RelatoriosPage() {
                     <p className="text-emerald-600 font-bold text-[10px] uppercase tracking-widest">Dinheiro</p>
                     <div className="bg-emerald-500/10 p-2 rounded-xl"><Banknote className="h-4 w-4 text-emerald-600" /></div>
                   </div>
-                  <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {pagamentos.dinheiro.toFixed(2)}</p>
+                  <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {Number(pagamentos.dinheiro || 0).toFixed(2)}</p>
                 </CardContent>
               </Card>
 
@@ -311,7 +346,7 @@ export default function RelatoriosPage() {
                     <p className="text-indigo-600 font-bold text-[10px] uppercase tracking-widest">Crédito</p>
                     <div className="bg-indigo-500/10 p-2 rounded-xl"><CreditCard className="h-4 w-4 text-indigo-600" /></div>
                   </div>
-                  <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {pagamentos.credito.toFixed(2)}</p>
+                  <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {Number(pagamentos.credito || 0).toFixed(2)}</p>
                 </CardContent>
               </Card>
 
@@ -321,7 +356,7 @@ export default function RelatoriosPage() {
                     <p className="text-orange-600 font-bold text-[10px] uppercase tracking-widest">Débito</p>
                     <div className="bg-orange-500/10 p-2 rounded-xl"><CreditCard className="h-4 w-4 text-orange-600" /></div>
                   </div>
-                  <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {pagamentos.debito.toFixed(2)}</p>
+                  <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {Number(pagamentos.debito || 0).toFixed(2)}</p>
                 </CardContent>
               </Card>
 
@@ -331,7 +366,6 @@ export default function RelatoriosPage() {
           {/* Linha 3: Gráficos Detalhados */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
-            {/* Gráfico Principal: Evolução de Receita */}
             <Card className="lg:col-span-2 rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm">
               <CardHeader className="border-b border-border/30 pb-4 px-6 pt-6">
                 <CardTitle className="text-lg font-black">Evolução de Entradas (Caixa)</CardTitle>
@@ -361,7 +395,6 @@ export default function RelatoriosPage() {
               </CardContent>
             </Card>
 
-            {/* Gráfico Secundário: Distribuição de Receita */}
             <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm flex flex-col">
               <CardHeader className="border-b border-border/30 pb-4 px-6 pt-6">
                 <CardTitle className="text-lg font-black">Origem das Receitas</CardTitle>
@@ -371,14 +404,14 @@ export default function RelatoriosPage() {
                   <div className="text-center text-muted-foreground space-y-2">
                     <BarChart3 className="h-12 w-12 mx-auto opacity-20" />
                     <p className="font-bold">Sem faturamento no período</p>
-                    <p className="text-xs font-medium opacity-70">Nenhuma venda ou OS finalizada.</p>
+                    <p className="text-xs font-medium opacity-70">Nenhuma receita à vista recebida.</p>
                   </div>
                 ) : (
                   <div className="h-[250px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
-                          data={graficoDistribuicao}
+                          data={graficoDistribuicao.filter(d => d.value > 0)}
                           cx="50%"
                           cy="50%"
                           innerRadius={65}
@@ -388,7 +421,7 @@ export default function RelatoriosPage() {
                           stroke="none"
                           cornerRadius={8}
                         >
-                          {graficoDistribuicao.map((entry, index) => (
+                          {graficoDistribuicao.filter(d => d.value > 0).map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={entry.color} />
                           ))}
                         </Pie>

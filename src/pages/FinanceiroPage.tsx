@@ -36,8 +36,8 @@ export default function FinanceiroPage() {
   const [mostrarTodos, setMostrarTodos] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
   
-  // ADICIONADO: Estado para o modal de exclusão de movimentação/venda
-  const [itemCaixaToDelete, setItemCaixaToDelete] = useState<{ id: string, tipo: string } | null>(null);
+  // Estado para o modal de exclusão de movimentação/venda
+  const [itemCaixaToDelete, setItemCaixaToDelete] = useState<any | null>(null);
 
   // Formulários
   const [saldoInicial, setSaldoInicial] = useState(0);
@@ -102,35 +102,47 @@ export default function FinanceiroPage() {
   const historicoCaixa = useMemo(() => {
     const lista: any[] = [];
     
+    // Movimentações avulsas
     movimentacoes.forEach((m: any) => lista.push({
       id: m.id,
       data: m.created_at,
       tipo: m.tipo,
+      categoria: m.categoria, // Necessário para a exclusão do crediário
+      origem_id: m.origem_id, // Necessário para identificar o crediário
+      descricaoOriginal: m.descricao,
       descricao: m.categoria + (m.descricao ? ` - ${m.descricao}` : ''),
       cliente: '—',
       valor: Number(m.valor),
       isSaida: m.tipo === 'saida' || m.tipo === 'sangria'
     }));
 
-    vendasPdv.forEach((v: any) => lista.push({
-      id: v.id,
-      data: v.created_at,
-      tipo: 'venda',
-      descricao: `Pagamento: ${String(v.forma_pagamento).replace('_', ' ').toUpperCase()}`,
-      cliente: v.clientes?.nome || 'Cliente Avulso',
-      valor: Number(v.valor_total),
-      isSaida: false
-    }));
+    // Vendas à vista
+    vendasPdv.forEach((v: any) => {
+      if (v.forma_pagamento === 'crediario') return;
+      lista.push({
+        id: v.id,
+        data: v.created_at,
+        tipo: 'venda',
+        descricao: `Pagamento: ${String(v.forma_pagamento).replace('_', ' ').toUpperCase()}`,
+        cliente: v.clientes?.nome || 'Cliente Avulso',
+        valor: Number(v.valor_total),
+        isSaida: false
+      });
+    });
 
-    ordensServico.forEach((o: any) => lista.push({
-      id: o.id,
-      data: o.data_finalizacao,
-      tipo: 'os',
-      descricao: `OS: ${o.numero_os} • Pagamento: ${String(o.forma_pagamento).replace('_', ' ').toUpperCase()}`,
-      cliente: o.clientes?.nome || 'Cliente Avulso',
-      valor: Number(o.valor_total),
-      isSaida: false
-    }));
+    // OS à vista
+    ordensServico.forEach((o: any) => {
+      if (o.forma_pagamento === 'crediario') return;
+      lista.push({
+        id: o.id,
+        data: o.data_finalizacao,
+        tipo: 'os',
+        descricao: `OS: ${o.numero_os} • Pagamento: ${String(o.forma_pagamento).replace('_', ' ').toUpperCase()}`,
+        cliente: o.clientes?.nome || 'Cliente Avulso',
+        valor: Number(o.valor_total),
+        isSaida: false
+      });
+    });
 
     return lista.sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime());
   }, [movimentacoes, vendasPdv, ordensServico]);
@@ -300,14 +312,14 @@ export default function FinanceiroPage() {
     },
   });
 
-  // ADICIONADO: NOVA MUTATION PARA EXCLUIR MOVIMENTAÇÃO / VENDA
+  // MUTATION PARA EXCLUIR MOVIMENTAÇÃO E REVERTER CREDIÁRIO
   const excluirHistoricoMut = useMutation({
-    mutationFn: async ({ id, tipo }: { id: string; tipo: string }) => {
+    mutationFn: async (item: any) => {
+      const { id, tipo, categoria, origem_id, descricaoOriginal } = item;
+
       if (tipo === 'venda') {
-        // 1. Busca os itens para devolver ao estoque
         const { data: itens } = await (supabase as any).from('venda_itens').select('produto_id, quantidade').eq('venda_id', id);
         
-        // 2. Devolve o estoque de cada item
         if (itens && itens.length > 0) {
           for (const item of itens) {
             const { data: prod } = await (supabase as any).from('produto_variacoes').select('estoque').eq('id', item.produto_id).single();
@@ -317,13 +329,11 @@ export default function FinanceiroPage() {
           }
         }
         
-        // 3. Deleta a venda (os itens são apagados em cascata ou manualmente)
         await (supabase as any).from('venda_itens').delete().eq('venda_id', id);
         const { error } = await (supabase as any).from('vendas').delete().eq('id', id);
         if (error) throw error;
         
       } else if (tipo === 'os') {
-        // Se for OS, não deletamos, apenas voltamos o status para tirar do fechamento atual
         const { error } = await (supabase as any).from('ordens_servico').update({ 
           status: 'pronto', 
           data_finalizacao: null 
@@ -331,7 +341,25 @@ export default function FinanceiroPage() {
         if (error) throw error;
         
       } else {
-        // Se for entrada/saída avulsa
+        // SE FOR UM PAGAMENTO DE CREDIÁRIO, REVERTE A PARCELA!
+        if (categoria === 'recebimento_crediario' && origem_id) {
+          // Extrai o número da parcela da descrição original ex: "Rec. Fiado: Parcela 2 - Breno"
+          const match = descricaoOriginal?.match(/Parcela (\d+)/);
+          if (match) {
+            const numero_parcela = parseInt(match[1]);
+            
+            // 1. Reverte a parcela para pendente
+            await (supabase as any).from('crediario_parcelas').update({
+              status_pagamento: 'pendente',
+              data_pagamento: null,
+              forma_pagamento: null
+            }).eq('crediario_id', origem_id).eq('numero_parcela', numero_parcela);
+            
+            // 2. Reverte o crediário principal para pendente caso estivesse quitado
+            await (supabase as any).from('crediarios').update({ status: 'pendente' }).eq('id', origem_id);
+          }
+        }
+        
         const { error } = await (supabase as any).from('movimentacoes_caixa').delete().eq('id', id);
         if (error) throw error;
       }
@@ -342,6 +370,10 @@ export default function FinanceiroPage() {
       queryClient.invalidateQueries({ queryKey: ["vendas_caixa_atual"] }); 
       queryClient.invalidateQueries({ queryKey: ["movimentacoes_caixa"] }); 
       queryClient.invalidateQueries({ queryKey: ["os_caixa_atual"] }); 
+      // Invalida crediário e relatórios para tirar a parcela do faturamento
+      queryClient.invalidateQueries({ queryKey: ["crediarios"] }); 
+      queryClient.invalidateQueries({ queryKey: ["relatorios_financeiros_v2"] }); 
+      queryClient.invalidateQueries({ queryKey: ["dashboard_metrics_v2"] }); 
     },
     onError: (err: any) => toast.error("Erro ao excluir", { description: err.message })
   });
@@ -499,7 +531,6 @@ export default function FinanceiroPage() {
                       <TableHead className="font-bold py-4 text-xs uppercase tracking-wider">Cliente</TableHead>
                       <TableHead className="font-bold py-4 text-xs uppercase tracking-wider">Detalhes</TableHead>
                       <TableHead className="font-bold py-4 text-xs uppercase tracking-wider text-right pr-6">Valor</TableHead>
-                      {/* ADICIONADO: Coluna vazia para a lixeira */}
                       <TableHead className="w-12"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -522,12 +553,11 @@ export default function FinanceiroPage() {
                           <TableCell className={cn("text-right font-mono font-black text-[15px] pr-6", h.isSaida ? "text-red-500" : "text-emerald-600")}>
                             {h.isSaida ? "- " : "+ "}R$ {Number(h.valor).toFixed(2)}
                           </TableCell>
-                          {/* ADICIONADO: Botão de exclusão */}
                           <TableCell>
                             <Button 
                               variant="ghost" 
                               size="icon" 
-                              onClick={() => setItemCaixaToDelete({ id: h.id, tipo: h.tipo })} 
+                              onClick={() => setItemCaixaToDelete(h)} 
                               className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -654,7 +684,7 @@ export default function FinanceiroPage() {
 
       {/* ================= MODAIS ================= */}
 
-      {/* ADICIONADO: Modal Excluir Histórico do Caixa */}
+      {/* Modal Excluir Histórico do Caixa */}
       <Dialog open={!!itemCaixaToDelete} onOpenChange={(open) => !open && setItemCaixaToDelete(null)}>
         <DialogContent className="sm:max-w-sm rounded-[2rem] p-6 text-center border-red-500/20 shadow-2xl">
           <div className="mx-auto bg-red-500/10 p-4 rounded-full w-fit mb-3">
@@ -664,11 +694,12 @@ export default function FinanceiroPage() {
           <p className="text-sm text-muted-foreground font-medium mb-6 px-2">
             {itemCaixaToDelete?.tipo === 'venda' ? 'A venda será apagada e os itens voltarão para o estoque.' : 
              itemCaixaToDelete?.tipo === 'os' ? 'A OS será removida do caixa atual e voltará para o status "Pronto".' :
+             itemCaixaToDelete?.categoria === 'recebimento_crediario' ? 'O pagamento será cancelado e a parcela voltará a ficar pendente no crediário do cliente.' :
              'Esta movimentação será apagada permanentemente do caixa.'}
           </p>
           
           <Button 
-            onClick={() => { if(itemCaixaToDelete) excluirHistoricoMut.mutate({ id: itemCaixaToDelete.id, tipo: itemCaixaToDelete.tipo }); }} 
+            onClick={() => { if(itemCaixaToDelete) excluirHistoricoMut.mutate(itemCaixaToDelete); }} 
             disabled={excluirHistoricoMut.isPending} 
             variant="destructive" 
             className="w-full h-12 rounded-xl font-bold text-base shadow-lg shadow-red-500/20 hover:bg-red-600 transition-colors"

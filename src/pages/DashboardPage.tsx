@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { DollarSign, ShoppingCart, Wrench, AlertTriangle, TrendingUp, TrendingDown, Package, Loader2, Eye, EyeOff } from "lucide-react";
 
-// Tipagem explícita para evitar erros do TypeScript com o Map
 interface VarMapInfo {
   nomeBase: string;
   qualidade: string;
@@ -36,20 +35,21 @@ export default function DashboardPage() {
         { data: produtoBases },
         { data: produtoVariacoes },
         { data: itensVenda },
-        { data: pecasOs }
+        { data: pecasOs },
+        { data: parcelasPagas } // NOVO: Traz as parcelas do crediário pagas neste mês
       ] = await Promise.all([
-        supabase.from("vendas").select("id, valor_total, created_at").gte("created_at", inicioMes),
-        supabase.from("ordens_servico").select("id, valor_total, data_finalizacao, status, created_at"),
+        supabase.from("vendas").select("id, valor_total, created_at, forma_pagamento").gte("created_at", inicioMes),
+        supabase.from("ordens_servico").select("id, valor_total, data_finalizacao, status, created_at, forma_pagamento"),
         (supabase as any).from("produto_base").select("id, nome"),
         (supabase as any).from("produto_variacoes").select("id, produto_id, estoque, estoque_minimo, qualidade"),
         (supabase as any).from("venda_itens").select("produto_id, quantidade").gte("created_at", inicioMes),
-        (supabase as any).from("ordem_servico_pecas").select("produto_id, quantidade, ordem_servico_id")
+        (supabase as any).from("ordem_servico_pecas").select("produto_id, quantidade, ordem_servico_id"),
+        supabase.from("crediario_parcelas").select("valor_parcela, data_pagamento").eq("status_pagamento", "pago").gte("data_pagamento", inicioMes)
       ]);
 
       // --- MAPEAMENTO EM MEMÓRIA ---
       const baseMap = new Map<string, string>((produtoBases || []).map((b: any) => [b.id, b.nome]));
       
-      // Usando a tipagem explícita VarMapInfo
       const varMap = new Map<string, VarMapInfo>((produtoVariacoes || []).map((v: any) => [
         v.id, 
         { 
@@ -64,7 +64,10 @@ export default function DashboardPage() {
       let fatMesAtual = 0;
       let fatHoje = 0;
 
+      // 1.1 Vendas à vista
       vendas?.forEach(v => {
+        if (v.forma_pagamento === 'crediario') return; // Ignora o valor total do fiado
+
         fatMesAtual += Number(v.valor_total);
         if (v.created_at >= inicioDia) fatHoje += Number(v.valor_total);
       });
@@ -72,17 +75,30 @@ export default function DashboardPage() {
       let osEmAndamento = 0;
       const osEntreguesMesIds = new Set<string>(); 
 
+      // 1.2 OS à vista
       ordens?.forEach(o => {
         if (o.status !== "entregue" && o.status !== "cancelada") {
           osEmAndamento++;
         }
         if (o.status === "entregue" && o.data_finalizacao) {
           if (o.data_finalizacao >= inicioMes) {
-            fatMesAtual += Number(o.valor_total);
+            if (o.forma_pagamento !== 'crediario') {
+              fatMesAtual += Number(o.valor_total);
+            }
             osEntreguesMesIds.add(o.id); 
           }
-          if (o.data_finalizacao >= inicioDia) {
+          if (o.data_finalizacao >= inicioDia && o.forma_pagamento !== 'crediario') {
             fatHoje += Number(o.valor_total);
+          }
+        }
+      });
+
+      // 1.3 Adicionar as Parcelas Efetivamente Pagas do Crediário
+      parcelasPagas?.forEach(p => {
+        if (p.data_pagamento) {
+          fatMesAtual += Number(p.valor_parcela);
+          if (p.data_pagamento >= inicioDia) {
+            fatHoje += Number(p.valor_parcela);
           }
         }
       });
@@ -101,30 +117,35 @@ export default function DashboardPage() {
         .sort((a: any, b: any) => a.estoque - b.estoque);
 
       // --- 2. GRÁFICO COMBINADO (ÚLTIMOS 7 DIAS) ---
-      const historicoMap = new Map<string, { data: string; PDV: number; Serviços: number }>();
+      const historicoMap = new Map<string, { data: string; PDV: number; Serviços: number; Crediário: number }>();
       const formatador = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' });
 
       for (let i = 0; i < 7; i++) {
         const d = new Date(seteDiasAtras);
         d.setDate(d.getDate() + i);
-        historicoMap.set(formatador.format(d), { data: formatador.format(d), PDV: 0, Serviços: 0 });
+        historicoMap.set(formatador.format(d), { data: formatador.format(d), PDV: 0, Serviços: 0, Crediário: 0 });
       }
 
-      vendas?.filter(v => v.created_at >= isoSeteDias).forEach(v => {
+      vendas?.filter(v => v.created_at >= isoSeteDias && v.forma_pagamento !== 'crediario').forEach(v => {
         const chave = formatador.format(new Date(v.created_at));
         if (historicoMap.has(chave)) historicoMap.get(chave)!.PDV += Number(v.valor_total);
       });
 
-      ordens?.filter(o => o.status === "entregue" && o.data_finalizacao && o.data_finalizacao >= isoSeteDias).forEach(o => {
+      ordens?.filter(o => o.status === "entregue" && o.data_finalizacao && o.data_finalizacao >= isoSeteDias && o.forma_pagamento !== 'crediario').forEach(o => {
         const chave = formatador.format(new Date(o.data_finalizacao!));
         if (historicoMap.has(chave)) historicoMap.get(chave)!.Serviços += Number(o.valor_total);
+      });
+
+      parcelasPagas?.filter(p => p.data_pagamento && p.data_pagamento >= isoSeteDias).forEach(p => {
+        const chave = formatador.format(new Date(p.data_pagamento));
+        if (historicoMap.has(chave)) historicoMap.get(chave)!.Crediário += Number(p.valor_parcela);
       });
 
       // --- 3. RANKING DE PRODUTOS ---
       const rankingMap = new Map<string, number>();
       
       itensVenda?.forEach((item: any) => {
-        const info = varMap.get(item.produto_id); // info agora é tipado como VarMapInfo | undefined
+        const info = varMap.get(item.produto_id);
         const nomeCompleto = info ? `${info.nomeBase} - ${info.qualidade}` : "Item Excluído";
         rankingMap.set(nomeCompleto, (rankingMap.get(nomeCompleto) || 0) + item.quantidade);
       });
@@ -194,8 +215,8 @@ export default function DashboardPage() {
             <div className="flex justify-between items-start">
               <div className="space-y-2">
                 <p className="text-primary-foreground/90 font-medium text-sm tracking-wide">Faturamento do Mês</p>
-                <p className="text-3xl font-black tracking-tighter drop-shadow-sm">
-                  R$ {showValues ? kpis.fatMesAtual.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : "••••••"}
+               <p className="text-3xl font-black tracking-tighter drop-shadow-sm">
+                    R$ {showValues ? kpis.fatMesAtual.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "••••••"}
                 </p>
               </div>
               <div className="bg-background/20 backdrop-blur-md p-3 rounded-2xl shadow-inner shrink-0"><DollarSign className="h-6 w-6 text-primary-foreground" /></div>
@@ -208,9 +229,9 @@ export default function DashboardPage() {
             <div className="flex justify-between items-start">
               <div className="space-y-2">
                 <p className="text-muted-foreground font-medium text-sm tracking-wide">Caixa de Hoje</p>
-                <p className="text-3xl font-black tracking-tighter text-foreground">
-                  R$ {showValues ? kpis.fatHoje.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : "••••••"}
-                </p>
+               <p className="text-3xl font-black tracking-tighter text-foreground">
+                R$ {showValues ? kpis.fatHoje.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "••••••"}
+                      </p>
               </div>
               <div className="bg-emerald-500/10 p-3 rounded-2xl border border-emerald-500/20 shrink-0"><ShoppingCart className="h-6 w-6 text-emerald-500" /></div>
             </div>
@@ -267,7 +288,7 @@ export default function DashboardPage() {
         
         <Card className="xl:col-span-2 rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm flex flex-col overflow-hidden">
           <CardHeader className="border-b border-border/40 pb-4 px-6 pt-6 bg-card shrink-0">
-            <CardTitle className="text-base font-bold text-foreground">Entradas Financeiras: PDV vs Serviços (Últimos 7 dias)</CardTitle>
+            <CardTitle className="text-base font-bold text-foreground">Entradas Financeiras (Últimos 7 dias)</CardTitle>
           </CardHeader>
           <CardContent className="p-6 pt-8 flex-1 bg-card/30 min-h-[350px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -287,8 +308,9 @@ export default function DashboardPage() {
                   labelStyle={{ fontWeight: 'bold', color: 'hsl(var(--muted-foreground))', marginBottom: '8px' }}
                 />
                 <Legend verticalAlign="top" height={40} iconType="circle" wrapperStyle={{ paddingBottom: '20px', fontSize: '13px', fontWeight: 500 }} />
-                <Bar dataKey="PDV" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} barSize={32} />
-                <Bar dataKey="Serviços" fill="hsl(var(--status-ready))" radius={[6, 6, 0, 0]} barSize={32} />
+                <Bar dataKey="PDV" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} barSize={24} />
+                <Bar dataKey="Serviços" fill="hsl(var(--status-ready))" radius={[6, 6, 0, 0]} barSize={24} />
+                <Bar dataKey="Crediário" fill="#f97316" radius={[6, 6, 0, 0]} barSize={24} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>

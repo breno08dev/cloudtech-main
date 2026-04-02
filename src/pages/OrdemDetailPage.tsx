@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import { 
   Printer, Plus, Trash2, Loader2, FileText, ShieldCheck, Undo2,
   UserCircle, Smartphone, Wrench, Package, ClipboardList, CheckCircle2,
-  Banknote, CreditCard, QrCode, PieChart, Save
+  Banknote, CreditCard, QrCode, PieChart, Save, BookOpenCheck, AlertCircle
 } from "lucide-react";
 
 export default function OrdemDetailPage() {
@@ -41,6 +41,16 @@ export default function OrdemDetailPage() {
   const [paymentData, setPaymentData] = useState({ metodo: "pix", desconto: 0 });
   const [pagamentoMisto, setPagamentoMisto] = useState({ dinheiro: 0, pix: 0, cartao_credito: 0, cartao_debito: 0 });
   const [valorRecebido, setValorRecebido] = useState<number | "">("");
+
+  // ADICIONADO: Estados para Crediário
+  const [parcelasCrediario, setParcelasCrediario] = useState<number>(1);
+  const [dataVencimentoCrediario, setDataVencimentoCrediario] = useState<string>("");
+
+  useEffect(() => {
+    const defaultDate = new Date();
+    defaultDate.setDate(defaultDate.getDate() + 30);
+    setDataVencimentoCrediario(defaultDate.toISOString().split('T')[0]);
+  }, []);
 
   const { data: config } = useQuery({
     queryKey: ["configuracoes"],
@@ -136,15 +146,17 @@ export default function OrdemDetailPage() {
     }).eq("id", osId);
   };
 
-const saveOsMutation = useMutation({
+  const saveOsMutation = useMutation({
     mutationFn: async (overrides?: any) => {
-      const rawUpdates = { ...editForm, ...overrides };
+      const { criar_crediario, parcelas, vencimento, ...rawUpdates } = overrides || {};
+      
+      const baseUpdates = { ...editForm, ...rawUpdates };
       const updates: any = {};
 
-      for (const key in rawUpdates) {
+      for (const key in baseUpdates) {
         if (key === 'id') continue; 
-        if (rawUpdates[key] === "") updates[key] = null;
-        else updates[key] = rawUpdates[key];
+        if (baseUpdates[key] === "") updates[key] = null;
+        else updates[key] = baseUpdates[key];
       }
 
       if (updates.status === "pronto" || updates.status === "entregue") {
@@ -155,14 +167,50 @@ const saveOsMutation = useMutation({
       if (updates.valor_total !== undefined && updates.valor_total !== null) updates.valor_total = Number(updates.valor_total) || 0;
       if (updates.peca_original !== undefined) updates.peca_original = Boolean(updates.peca_original);
 
+      // 1. Guardar Ordem de Serviço
       const { error } = await supabase.from("ordens_servico").update(updates).eq("id", id!);
       if (error) throw error;
+      
+      // 2. Se for crediário, regista a dívida
+      if (criar_crediario && data?.ordem?.cliente_id) {
+        const valorTotalFinal = updates.valor_total;
+        
+        const { data: crediario, error: credErr } = await (supabase as any).from("crediarios").insert({
+          cliente_id: data.ordem.cliente_id,
+          ordem_servico_id: id!,
+          valor_total: valorTotalFinal,
+          status: "pendente"
+        }).select("id").single();
+        
+        if (credErr) throw credErr;
+
+        const valorParcela = valorTotalFinal / (parcelas || 1);
+        const parcelasPayload = [];
+        const dataBase = new Date(vencimento + "T12:00:00");
+        
+        for (let i = 1; i <= parcelas; i++) {
+          const dataVenc = new Date(dataBase);
+          dataVenc.setMonth(dataVenc.getMonth() + (i - 1));
+          
+          parcelasPayload.push({
+            crediario_id: crediario.id,
+            numero_parcela: i,
+            valor_parcela: valorParcela,
+            data_vencimento: dataVenc.toISOString().split('T')[0],
+            status_pagamento: "pendente"
+          });
+        }
+        
+        const { error: parcErr } = await (supabase as any).from("crediario_parcelas").insert(parcelasPayload);
+        if (parcErr) throw parcErr;
+      }
     },
     onSuccess: () => {
       toast.success("Ordem de Serviço salva com sucesso!");
       queryClient.invalidateQueries({ queryKey: ["ordem_detail", id] });
       queryClient.invalidateQueries({ queryKey: ["ordens_servico"] });
-      navigate("/ordens"); // <-- ADICIONADO AQUI: Redireciona para a lista
+      queryClient.invalidateQueries({ queryKey: ["crediarios"] }); // Invalida crediário também
+      navigate("/ordens"); 
     },
     onError: (err: any) => toast.error(`Erro ao salvar: ${err.message}`),
   });
@@ -226,6 +274,12 @@ const saveOsMutation = useMutation({
       setPaymentData({ metodo: "pix", desconto: 0 }); 
       setPagamentoMisto({ dinheiro: 0, pix: 0, cartao_credito: 0, cartao_debito: 0 });
       setValorRecebido("");
+      setParcelasCrediario(1);
+      
+      const defaultDate = new Date();
+      defaultDate.setDate(defaultDate.getDate() + 30);
+      setDataVencimentoCrediario(defaultDate.toISOString().split('T')[0]);
+
       setIsPaymentModalOpen(true);
     } else {
       setEditForm({ ...editForm, status: newStatus });
@@ -238,14 +292,20 @@ const saveOsMutation = useMutation({
       return;
     }
 
-    const overrides = {
+    const overrides: any = {
       status: "entregue",
       forma_pagamento: getFormaPagamentoString(),
       desconto: paymentData.desconto,
       valor_total: valorFinalComDesconto
     };
+
+    if (paymentData.metodo === "crediario") {
+      overrides.criar_crediario = true;
+      overrides.parcelas = parcelasCrediario;
+      overrides.vencimento = dataVencimentoCrediario;
+    }
     
-    setEditForm({ ...editForm, ...overrides });
+    setEditForm({ ...editForm, status: "entregue" });
     setIsPaymentModalOpen(false);
     saveOsMutation.mutate(overrides);
   };
@@ -553,7 +613,9 @@ const saveOsMutation = useMutation({
    }
   };
 
-  const isConfirmarDisabled = saveOsMutation.isPending || (paymentData.metodo === 'misto' && faltaMisto > 0.01);
+  const isConfirmarDisabled = saveOsMutation.isPending || 
+    (paymentData.metodo === 'misto' && faltaMisto > 0.01) ||
+    (paymentData.metodo === 'crediario' && !data?.ordem?.cliente_id);
 
   return (
     <div className="print:hidden space-y-6 max-w-5xl mx-auto pb-12 animate-in fade-in duration-500">
@@ -719,7 +781,6 @@ const saveOsMutation = useMutation({
                 </SelectContent>
               </Select>
               
-              {/* BOTÃO DE SALVAR QUE HAVIA SUMIDO AGORA EM DESTAQUE */}
             <Button 
                 onClick={() => saveOsMutation.mutate({})} 
                 disabled={saveOsMutation.isPending} 
@@ -727,24 +788,20 @@ const saveOsMutation = useMutation({
               >
                 {saveOsMutation.isPending ? <Loader2 className="h-5 w-5 mr-2 animate-spin" /> : <Save className="h-5 w-5 mr-2" />}
                 Salvar Atualizações
-                </Button>
-
+              </Button>
             </div>
           </CardContent>
         </Card>
       </div>
 
       <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
-        {/* MODAL AJUSTADO: max-h-[90vh] e flex-col para forçar o scroll interno */}
         <DialogContent className="sm:max-w-xl max-h-[90vh] flex flex-col rounded-3xl p-0 overflow-hidden border-border/40 shadow-2xl">
           
-          {/* HEADER FIXO DO MODAL */}
           <div className="bg-primary/10 p-6 flex flex-col items-center justify-center border-b border-border/40 relative shrink-0">
             <div className="absolute top-4 right-4 bg-background/50 px-3 py-1 rounded-full text-xs font-bold border border-border/60">OS: {ordem.numero_os}</div>
             <DialogTitle className="text-2xl font-black mt-2">Finalizar Entrega</DialogTitle>
           </div>
           
-          {/* CORPO ROLÁVEL DO MODAL (A Mágica acontece aqui) */}
           <div className="p-6 space-y-6 bg-background overflow-y-auto flex-1 scrollbar-thin">
             <div className="space-y-3">
               <Label className="text-sm font-bold uppercase tracking-wider text-muted-foreground/80">Forma de Pagamento</Label>
@@ -754,9 +811,10 @@ const saveOsMutation = useMutation({
                   { id: 'dinheiro', label: 'Dinheiro', icon: Banknote },
                   { id: 'cartao_credito', label: 'Crédito', icon: CreditCard },
                   { id: 'cartao_debito', label: 'Débito', icon: CreditCard },
-                  { id: 'misto', label: 'Múltiplas (Misto)', icon: PieChart, colSpan: true },
+                  { id: 'misto', label: 'Múltiplas', icon: PieChart },
+                  { id: 'crediario', label: 'Crediário', icon: BookOpenCheck },
                 ].map((metodo) => (
-                  <div key={metodo.id} className={cn("relative", metodo.colSpan ? "md:col-span-2" : "")}>
+                  <div key={metodo.id} className="relative">
                     <RadioGroupItem value={metodo.id} id={metodo.id} className="peer sr-only" />
                     <Label htmlFor={metodo.id} className="flex flex-col items-center justify-center gap-2 p-3 rounded-xl border-2 border-border/50 bg-card hover:bg-muted/50 peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/5 cursor-pointer transition-all h-full text-center">
                       <metodo.icon className={cn("h-6 w-6", paymentData.metodo === metodo.id ? 'text-primary' : 'text-muted-foreground')} />
@@ -766,6 +824,47 @@ const saveOsMutation = useMutation({
                 ))}
               </RadioGroup>
             </div>
+
+            {/* OPÇÕES DO CREDIÁRIO */}
+            {paymentData.metodo === "crediario" && (
+              <div className="grid gap-3 mt-1 bg-orange-500/10 p-3 rounded-xl border border-orange-500/20 shadow-inner animate-in slide-in-from-top-2">
+                {!data?.ordem?.cliente_id ? (
+                  <p className="text-[11px] text-red-500 font-bold flex items-center gap-1.5 p-1">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    Esta OS não tem cliente vinculado para abrir Crediário.
+                  </p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label className="text-[9px] uppercase font-bold text-muted-foreground ml-1">Nº Parcelas</Label>
+                        <Input 
+                          type="number" min="1" max="24" 
+                          value={parcelasCrediario} 
+                          onChange={(e) => setParcelasCrediario(Number(e.target.value))} 
+                          className="h-10 mt-1 text-xs font-mono bg-background border-orange-500/30 focus-visible:ring-orange-500" 
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-[9px] uppercase font-bold text-muted-foreground ml-1">1º Vencimento</Label>
+                        <Input 
+                          type="date" 
+                          value={dataVencimentoCrediario} 
+                          onChange={(e) => setDataVencimentoCrediario(e.target.value)} 
+                          className="h-10 mt-1 text-xs font-mono bg-background border-orange-500/30 focus-visible:ring-orange-500" 
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center pt-2 mt-1 border-t border-orange-500/20">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Valor da parcela:</span>
+                      <span className="text-sm font-mono font-black text-orange-600">
+                        R$ {(valorFinalComDesconto / (parcelasCrediario || 1)).toFixed(2)}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
             <div className="space-y-3">
               <Label className="text-sm font-bold uppercase tracking-wider text-muted-foreground/80">Aplicar Desconto (R$)</Label>
@@ -821,7 +920,6 @@ const saveOsMutation = useMutation({
             </div>
           </div>
           
-          {/* FOOTER FIXO DO MODAL */}
           <DialogFooter className="p-4 bg-muted/20 border-t border-border/40 sm:justify-between flex-row shrink-0">
             <Button variant="ghost" onClick={() => setIsPaymentModalOpen(false)} className="rounded-xl">Cancelar</Button>
             <Button onClick={handleConfirmPayment} disabled={isConfirmarDisabled} className="rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold shadow-lg shadow-primary/20 px-6 disabled:opacity-50"><CheckCircle2 className="mr-2 h-4 w-4" /> Confirmar Pagamento</Button>

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Search, ShoppingCart, Plus, Minus, Trash2, CreditCard, Banknote, Smartphone, Loader2, Check, ChevronsUpDown, PackageOpen, BadgePercent, Printer, Barcode, PieChart } from "lucide-react";
+import { Search, ShoppingCart, Plus, Minus, Trash2, CreditCard, Banknote, Smartphone, Loader2, Check, ChevronsUpDown, PackageOpen, BadgePercent, Printer, Barcode, PieChart, BookOpenCheck, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -36,18 +36,31 @@ export default function VendasPage() {
   
   const [clienteId, setClienteId] = useState<string>("avulso");
   const [openCliente, setOpenCliente] = useState(false);
+  const [searchCliente, setSearchCliente] = useState(""); // NOVO: Estado para a busca do cliente
   
-  // Estados de Pagamento
+  // Estados de Pagamento e Desconto
+  const [descontoValor, setDescontoValor] = useState<number | "">(""); 
   const [formaPagamento, setFormaPagamento] = useState<string>("dinheiro");
-  const [valorRecebido, setValorRecebido] = useState<number | "">(""); // NOVO: Para calcular o troco
+  const [valorRecebido, setValorRecebido] = useState<number | "">(""); 
   const [pagamentoMisto, setPagamentoMisto] = useState({
     dinheiro: 0,
     pix: 0,
     cartao_credito: 0,
     cartao_debito: 0
   });
-  
+
+  // Estados exclusivos do CREDIÁRIO
+  const [parcelasCrediario, setParcelasCrediario] = useState<number>(1);
+  const [dataVencimentoCrediario, setDataVencimentoCrediario] = useState<string>("");
+
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+
+  // Define a data padrao para 30 dias a frente
+  useEffect(() => {
+    const defaultDate = new Date();
+    defaultDate.setDate(defaultDate.getDate() + 30);
+    setDataVencimentoCrediario(defaultDate.toISOString().split('T')[0]);
+  }, []);
 
   const { data: config } = useQuery({
     queryKey: ["configuracoes"],
@@ -92,7 +105,7 @@ export default function VendasPage() {
   const produtosFiltrados = useMemo(() => {
     if (!search) return produtos;
     const s = search.toLowerCase();
-    return produtos.filter(p => 
+    return produtos.filter((p: SellableItem) => 
       p.nome.toLowerCase().includes(s) || 
       p.codigo_barras.toLowerCase() === s ||
       p.qualidade.toLowerCase().includes(s)
@@ -102,15 +115,34 @@ export default function VendasPage() {
   const { data: clientes = [] } = useQuery({
     queryKey: ["clientes_select_pdv"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("clientes").select("id, nome, tipo_cliente").order("nome");
+      const { data, error } = await supabase.from("clientes").select("id, nome, cpf_cnpj, telefone, whatsapp, tipo_cliente").order("nome");
       if (error) throw error;
       return data;
     },
   });
 
+  // NOVO: Lógica de Filtro dos Clientes
+  const clientesFiltrados = useMemo(() => {
+    if (!searchCliente) return []; // Retorna vazio se não tiver busca
+    
+    const termo = searchCliente.toLowerCase();
+    const termoApenasNumeros = termo.replace(/\D/g, ''); // Para ajudar na busca por CPF/CNPJ/Tel
+    
+    return clientes.filter((c: any) => {
+      const matchNome = c.nome.toLowerCase().includes(termo);
+      const docLimpo = c.cpf_cnpj ? c.cpf_cnpj.replace(/\D/g, '') : '';
+      const matchDoc = termoApenasNumeros && docLimpo.includes(termoApenasNumeros);
+      const telLimpo = c.telefone ? c.telefone.replace(/\D/g, '') : '';
+      const whatsLimpo = c.whatsapp ? c.whatsapp.replace(/\D/g, '') : '';
+      const matchTel = termoApenasNumeros && (telLimpo.includes(termoApenasNumeros) || whatsLimpo.includes(termoApenasNumeros));
+      
+      return matchNome || matchDoc || matchTel;
+    });
+  }, [clientes, searchCliente]);
+
   const isLojista = useMemo(() => {
     if (clienteId === "avulso") return false;
-    const cliente = clientes.find((c) => c.id === clienteId);
+    const cliente = clientes.find((c: any) => c.id === clienteId);
     return cliente?.tipo_cliente === "lojista";
   }, [clienteId, clientes]);
 
@@ -119,7 +151,9 @@ export default function VendasPage() {
     return p.preco_venda;
   };
 
-  const cartTotal = useMemo(() => cart.reduce((acc, item) => acc + (getProductPrice(item.produto) * item.quantidade), 0), [cart, isLojista]);
+  // CÁLCULOS DE CARRINHO E DESCONTO
+  const cartSubtotal = useMemo(() => cart.reduce((acc, item) => acc + (getProductPrice(item.produto) * item.quantidade), 0), [cart, isLojista]);
+  const cartTotal = Math.max(0, cartSubtotal - Number(descontoValor || 0));
   const cartItemsCount = useMemo(() => cart.reduce((acc, item) => acc + item.quantidade, 0), [cart]);
 
   // Lógica de Pagamento Misto
@@ -155,7 +189,7 @@ export default function VendasPage() {
   const handleBarcodeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!search) return;
-    const itemEncontrado = produtos.find(p => p.codigo_barras === search);
+    const itemEncontrado = produtos.find((p: SellableItem) => p.codigo_barras === search);
     if (itemEncontrado) {
       addToCart(itemEncontrado);
       setSearch("");
@@ -187,14 +221,20 @@ export default function VendasPage() {
     setClienteId("avulso"); 
     setFormaPagamento("dinheiro"); 
     setValorRecebido("");
+    setDescontoValor("");
     setPagamentoMisto({ dinheiro: 0, pix: 0, cartao_credito: 0, cartao_debito: 0 });
+    setParcelasCrediario(1);
+    
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    setDataVencimentoCrediario(d.toISOString().split('T')[0]);
   };
 
   const imprimirCupom = () => {
     const nomeEmpresa = config?.nome_empresa || "MINHA EMPRESA";
     const endereco = config?.endereco || "";
     const telefone = config?.telefone || "";
-    const nomeCliente = clienteId === "avulso" ? "Avulso" : clientes.find((c) => c.id === clienteId)?.nome || "Não informado";
+    const nomeCliente = clienteId === "avulso" ? "Avulso" : clientes.find((c: any) => c.id === clienteId)?.nome || "Não informado";
     const dataAtual = new Date().toLocaleString("pt-BR");
     const pagamentoFormatado = getFormaPagamentoString();
 
@@ -231,6 +271,9 @@ export default function VendasPage() {
         <div style="margin-bottom: 8px;"><p><span class="bold">Cliente:</span> ${nomeCliente}</p><p><span class="bold">Pagamento:</span> ${pagamentoFormatado}</p></div>
         <table><thead><tr><th>QTD</th><th>PRODUTO</th><th class="right">UN</th><th class="right">TOT</th></tr></thead><tbody>${linhasProdutos}</tbody></table>
         <div class="linha"></div>
+        
+        <div class="right"><p class="bold" style="font-size: 14px;">SUBTOTAL: R$ ${cartSubtotal.toFixed(2)}</p></div>
+        ${Number(descontoValor) > 0 ? `<div class="right"><p style="font-size: 14px;">DESCONTO: - R$ ${Number(descontoValor).toFixed(2)}</p></div>` : ''}
         <div class="right"><h2 class="bold" style="font-size: 16px;">TOTAL: R$ ${cartTotal.toFixed(2)}</h2></div>
         
         ${formaPagamento === 'misto' && faltaMisto < -0.01 ? `
@@ -244,6 +287,14 @@ export default function VendasPage() {
           </div>
         ` : ''}
         
+        ${formaPagamento === 'crediario' ? `
+          <div class="center" style="margin-top: 10px; border: 1px dashed #000; padding: 5px;">
+            <p class="bold uppercase">Registado no Crediário</p>
+            <p style="font-size: 11px;">${parcelasCrediario}x de R$ ${(cartTotal / (parcelasCrediario || 1)).toFixed(2)}</p>
+            <p style="font-size: 11px;">1º Vencimento: ${new Date(dataVencimentoCrediario + 'T12:00:00').toLocaleDateString("pt-BR")}</p>
+          </div>
+        ` : ''}
+
         <div class="center" style="margin-top: 20px;"><p class="bold">Obrigado pela preferencia!</p><p style="font-size: 10px; margin-top: 5px;">Sistema</p></div>
       </body></html>
     `;
@@ -282,17 +333,53 @@ export default function VendasPage() {
     mutationFn: async (shouldPrint: boolean) => {
       if (cart.length === 0) throw new Error("O carrinho está vazio.");
       if (formaPagamento === "misto" && faltaMisto > 0.01) throw new Error("O valor misto não cobre o total da venda.");
+      if (formaPagamento === "crediario" && clienteId === "avulso") throw new Error("Vendas no crediário requerem um cliente cadastrado.");
 
       const pagamentoFinalString = getFormaPagamentoString();
 
+      // 1. INSERE A VENDA
       const { data: venda, error: vendaErr } = await (supabase as any).from("vendas").insert({
         cliente_id: clienteId === "avulso" ? null : clienteId,
         valor_total: cartTotal,
-        forma_pagamento: pagamentoFinalString,
+        desconto: Number(descontoValor || 0),
+        forma_pagamento: formaPagamento === "misto" ? pagamentoFinalString : formaPagamento,
       }).select("id").single();
       
       if (vendaErr) throw vendaErr;
 
+      // 2. SE FOR CREDIÁRIO, INSERE O CREDIÁRIO E AS PARCELAS
+      if (formaPagamento === "crediario") {
+        const { data: crediario, error: credErr } = await (supabase as any).from("crediarios").insert({
+          cliente_id: clienteId,
+          venda_id: venda.id,
+          valor_total: cartTotal,
+          status: "pendente"
+        }).select("id").single();
+
+        if (credErr) throw credErr;
+
+        const valorParcela = cartTotal / parcelasCrediario;
+        const parcelasPayload = [];
+        const dataBase = new Date(dataVencimentoCrediario + "T12:00:00");
+
+        for (let i = 1; i <= parcelasCrediario; i++) {
+          const dataVenc = new Date(dataBase);
+          dataVenc.setMonth(dataVenc.getMonth() + (i - 1)); // Adiciona 1 mês para cada parcela subsequente
+
+          parcelasPayload.push({
+            crediario_id: crediario.id,
+            numero_parcela: i,
+            valor_parcela: valorParcela,
+            data_vencimento: dataVenc.toISOString().split('T')[0],
+            status_pagamento: "pendente"
+          });
+        }
+
+        const { error: parcErr } = await (supabase as any).from("crediario_parcelas").insert(parcelasPayload);
+        if (parcErr) throw parcErr;
+      }
+
+      // 3. INSERE OS ITENS DA VENDA
       const itensPayload = cart.map((item) => ({
         venda_id: venda.id,
         produto_id: item.produto.id, 
@@ -304,6 +391,7 @@ export default function VendasPage() {
       const { error: itensErr } = await (supabase as any).from("venda_itens").insert(itensPayload);
       if (itensErr) throw itensErr;
 
+      // 4. DESCONTA DO STOCK
       for (const item of cart) {
         await (supabase as any).from("produto_variacoes").update({ estoque: item.produto.estoque - item.quantidade }).eq("id", item.produto.id);
       }
@@ -316,11 +404,16 @@ export default function VendasPage() {
       clearCart();
       queryClient.invalidateQueries({ queryKey: ["produtos_pdv"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard_metrics"] });
+      // Invalida crediarios caso o utilizador va ver logo
+      queryClient.invalidateQueries({ queryKey: ["crediarios"] }); 
     },
     onError: (err: any) => { toast.error(err.message || "Erro ao finalizar."); },
   });
 
-  const isCobrarDisabled = cart.length === 0 || (formaPagamento === 'misto' && faltaMisto > 0.01);
+  const isCobrarDisabled = 
+    cart.length === 0 || 
+    (formaPagamento === 'misto' && faltaMisto > 0.01) ||
+    (formaPagamento === 'crediario' && clienteId === 'avulso');
 
   return (
     <>
@@ -339,6 +432,12 @@ export default function VendasPage() {
               <span className="text-primary truncate">{getFormaPagamentoString()}</span>
             </div>
             
+            {Number(descontoValor) > 0 && (
+              <p className="text-orange-500 font-bold uppercase text-xs mt-2 bg-orange-500/10 px-3 py-1 rounded-md">
+                Desconto Aplicado: R$ {Number(descontoValor).toFixed(2)}
+              </p>
+            )}
+
             {formaPagamento === 'misto' && faltaMisto < -0.01 && (
               <p className="text-emerald-500 font-bold uppercase text-xs mt-2 bg-emerald-500/10 px-3 py-1 rounded-md">
                 Troco: R$ {Math.abs(faltaMisto).toFixed(2)}
@@ -349,6 +448,12 @@ export default function VendasPage() {
               <p className="text-emerald-500 font-bold uppercase text-xs mt-2 bg-emerald-500/10 px-3 py-1 rounded-md border border-emerald-500/20">
                 Troco: R$ {(Number(valorRecebido) - cartTotal).toFixed(2)}
               </p>
+            )}
+
+            {formaPagamento === "crediario" && (
+              <div className="mt-2 text-xs font-bold bg-orange-500/10 text-orange-600 px-3 py-2 rounded-md border border-orange-500/20 w-full text-center">
+                Registado em {parcelasCrediario}x de R$ {(cartTotal / (parcelasCrediario || 1)).toFixed(2)}
+              </div>
             )}
           </div>
 
@@ -405,7 +510,7 @@ export default function VendasPage() {
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
-                {produtosFiltrados.map((p) => {
+                {produtosFiltrados.map((p: SellableItem) => {
                   const cartQtd = cart.find(i => i.produto.id === p.id)?.quantidade || 0;
                   const estoqueRestante = p.estoque - cartQtd; 
                   const esgotado = estoqueRestante <= 0;
@@ -511,37 +616,73 @@ export default function VendasPage() {
             
             <div className="grid gap-2">
               <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Cliente / Lojista</Label>
-              <Popover open={openCliente} onOpenChange={setOpenCliente}>
+              <Popover open={openCliente} onOpenChange={(open) => {
+                setOpenCliente(open);
+                if (!open) setSearchCliente(""); // Limpa a busca ao fechar
+              }}>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" role="combobox" aria-expanded={openCliente} className="w-full justify-between h-10 rounded-xl bg-background border-border/60 hover:bg-muted/50 text-xs font-bold">
-                    {clienteId === "avulso" ? "Cliente Avulso (Padrão)" : clientes.find((c) => c.id === clienteId)?.nome}
+                  <Button variant="outline" role="combobox" aria-expanded={openCliente} className={cn("w-full justify-between h-10 rounded-xl bg-background hover:bg-muted/50 text-xs font-bold", formaPagamento === "crediario" && clienteId === "avulso" ? "border-red-500 text-red-500" : "border-border/60")}>
+                    {clienteId === "avulso" ? "Cliente Avulso (Padrão)" : clientes.find((c: any) => c.id === clienteId)?.nome}
                     <ChevronsUpDown className="ml-2 h-3 w-3 opacity-50" />
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-[340px] p-0 rounded-xl" align="end">
-                  <Command>
-                    <CommandInput placeholder="Procurar cliente..." className="h-10 text-sm" />
+                  <Command shouldFilter={false}>
+                    <CommandInput 
+                      placeholder="Procurar por nome, CPF/CNPJ ou telefone..." 
+                      className="h-10 text-sm" 
+                      value={searchCliente}
+                      onValueChange={setSearchCliente}
+                    />
                     <CommandList className="max-h-[200px]">
-                      <CommandEmpty className="p-3 text-center text-xs">Nenhum cliente.</CommandEmpty>
-                      <CommandGroup>
-                        <CommandItem value="avulso" onSelect={() => { setClienteId("avulso"); setOpenCliente(false); }} className="py-2 cursor-pointer text-sm">
-                          <Check className={cn("mr-2 h-4 w-4 text-primary", clienteId === "avulso" ? "opacity-100" : "opacity-0")} />
-                          <span className="font-bold">Cliente Avulso</span>
-                        </CommandItem>
-                        {clientes.map((c) => (
-                          <CommandItem key={c.id} value={c.nome} onSelect={() => { setClienteId(c.id); setOpenCliente(false); }} className="py-2 cursor-pointer text-sm">
-                            <Check className={cn("mr-2 h-4 w-4 text-primary", clienteId === c.id ? "opacity-100" : "opacity-0")} />
-                            <div className="flex flex-col">
-                              <span className="font-bold">{c.nome}</span>
-                              {c.tipo_cliente === "lojista" && <span className="text-[9px] text-primary font-bold uppercase mt-0.5">Lojista</span>}
-                            </div>
+                      {searchCliente === "" ? (
+                        // SE NÃO TIVER BUSCA, MOSTRA SÓ O AVULSO (e fica vazio o resto)
+                        <CommandGroup>
+                          <CommandItem value="avulso" onSelect={() => { setClienteId("avulso"); setOpenCliente(false); }} className="py-2 cursor-pointer text-sm">
+                            <Check className={cn("mr-2 h-4 w-4 text-primary", clienteId === "avulso" ? "opacity-100" : "opacity-0")} />
+                            <span className="font-bold">Cliente Avulso</span>
                           </CommandItem>
-                        ))}
-                      </CommandGroup>
+                        </CommandGroup>
+                      ) : clientesFiltrados.length === 0 ? (
+                        <CommandEmpty className="p-3 text-center text-xs">Nenhum cliente encontrado.</CommandEmpty>
+                      ) : (
+                        <CommandGroup>
+                          <CommandItem value="avulso" onSelect={() => { setClienteId("avulso"); setOpenCliente(false); }} className="py-2 cursor-pointer text-sm border-b">
+                            <Check className={cn("mr-2 h-4 w-4 text-primary", clienteId === "avulso" ? "opacity-100" : "opacity-0")} />
+                            <span className="font-bold">Cliente Avulso</span>
+                          </CommandItem>
+                          {clientesFiltrados.map((c: any) => (
+                            <CommandItem key={c.id} value={c.nome} onSelect={() => { setClienteId(c.id); setOpenCliente(false); }} className="py-2 cursor-pointer text-sm">
+                              <Check className={cn("mr-2 h-4 w-4 text-primary", clienteId === c.id ? "opacity-100" : "opacity-0")} />
+                              <div className="flex flex-col w-full pr-2">
+                                <div className="flex justify-between w-full">
+                                  <span className="font-bold">{c.nome}</span>
+                                  {c.tipo_cliente === "lojista" && <span className="text-[9px] text-primary font-bold uppercase mt-0.5">Lojista</span>}
+                                </div>
+                                <span className="text-[10px] text-muted-foreground">{c.cpf_cnpj || c.telefone || ''}</span>
+                              </div>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      )}
                     </CommandList>
                   </Command>
                 </PopoverContent>
               </Popover>
+            </div>
+
+            {/* CAMPO DE DESCONTO */}
+            <div className="grid gap-2 mt-1">
+              <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Desconto Total (R$)</Label>
+              <Input 
+                type="number" 
+                min="0" 
+                step="0.01" 
+                value={descontoValor} 
+                onChange={(e) => setDescontoValor(e.target.value ? Number(e.target.value) : "")} 
+                className="h-10 rounded-xl bg-background border-border/60 font-mono text-sm shadow-inner focus-visible:ring-primary" 
+                placeholder="0.00"
+              />
             </div>
 
             <div className="grid gap-2">
@@ -554,12 +695,55 @@ export default function VendasPage() {
                   <SelectItem value="dinheiro" className="text-sm"><div className="flex items-center gap-2"><Banknote className="h-4 w-4 text-emerald-500" /> Dinheiro</div></SelectItem>
                   <SelectItem value="pix" className="text-sm"><div className="flex items-center gap-2"><Smartphone className="h-4 w-4 text-teal-500" /> PIX</div></SelectItem>
                   <SelectItem value="cartao_credito" className="text-sm"><div className="flex items-center gap-2"><CreditCard className="h-4 w-4 text-indigo-500" /> Crédito</div></SelectItem>
-                  <SelectItem value="cartao_debito" className="text-sm"><div className="flex items-center gap-2"><CreditCard className="h-4 w-4 text-orange-500" /> Débito</div></SelectItem>
-                  {/* NOVA OPÇÃO MISTA */}
+                  <SelectItem value="cartao_debito" className="text-sm"><div className="flex items-center gap-2"><CreditCard className="h-4 w-4 text-blue-500" /> Débito</div></SelectItem>
                   <SelectItem value="misto" className="text-sm bg-muted/30"><div className="flex items-center gap-2"><PieChart className="h-4 w-4 text-purple-500" /> Múltiplas (Misto)</div></SelectItem>
+                  <SelectItem value="crediario" className="text-sm bg-orange-500/10"><div className="flex items-center gap-2"><BookOpenCheck className="h-4 w-4 text-orange-600" /> Crediário / Fiado</div></SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {/* PARÂMETROS DO CREDIÁRIO */}
+            {formaPagamento === "crediario" && (
+              <div className="grid gap-3 mt-1 bg-orange-500/10 p-3 rounded-xl border border-orange-500/20 shadow-inner animate-in slide-in-from-top-2">
+                {clienteId === "avulso" ? (
+                  <p className="text-[11px] text-red-500 font-bold flex items-center gap-1.5 p-1">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    Selecione um cliente no topo para abrir um Crediário.
+                  </p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label className="text-[9px] uppercase font-bold text-muted-foreground ml-1">Nº Parcelas</Label>
+                        <Input 
+                          type="number" 
+                          min="1" 
+                          max="24" 
+                          value={parcelasCrediario} 
+                          onChange={(e) => setParcelasCrediario(Number(e.target.value))} 
+                          className="h-8 mt-1 text-xs font-mono bg-background border-orange-500/30 focus-visible:ring-orange-500" 
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-[9px] uppercase font-bold text-muted-foreground ml-1">1º Vencimento</Label>
+                        <Input 
+                          type="date" 
+                          value={dataVencimentoCrediario} 
+                          onChange={(e) => setDataVencimentoCrediario(e.target.value)} 
+                          className="h-8 mt-1 text-xs font-mono bg-background border-orange-500/30 focus-visible:ring-orange-500" 
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center pt-2 mt-1 border-t border-orange-500/20">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Valor da parcela:</span>
+                      <span className="text-sm font-mono font-black text-orange-600">
+                        R$ {(cartTotal / (parcelasCrediario || 1)).toFixed(2)}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
             {/* CAMPO DE VALOR RECEBIDO (TROCO) */}
             {(formaPagamento === "dinheiro" || formaPagamento === "pix") && (
@@ -620,11 +804,11 @@ export default function VendasPage() {
             </div>
             
             <Button 
-              className="w-full h-12 rounded-xl text-base font-bold shadow-lg shadow-primary/20 transition-all disabled:opacity-50" 
+              className={cn("w-full h-12 rounded-xl text-base font-bold shadow-lg transition-all", isCobrarDisabled ? "opacity-50 cursor-not-allowed bg-muted text-muted-foreground shadow-none" : "shadow-primary/20 bg-primary hover:bg-primary/90")} 
               disabled={isCobrarDisabled} 
               onClick={() => setIsConfirmModalOpen(true)}
             >
-              Cobrar
+              {formaPagamento === 'crediario' ? 'Gravar no Fiado' : 'Cobrar'}
             </Button>
           </div>
         </div>

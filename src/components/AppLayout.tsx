@@ -1,4 +1,4 @@
-import { SidebarProvider } from "@/components/ui/sidebar";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -57,6 +57,12 @@ export function AppLayout({ children }: AppLayoutProps) {
       <div className="h-screen w-full flex overflow-hidden bg-background text-foreground">
         <AppSidebar />
         <div className="flex-1 flex flex-col min-w-0 h-screen">
+          
+          {/* Botão de menu visível apenas no mobile */}
+          <div className="md:hidden flex items-center px-4 pt-4">
+            <SidebarTrigger className="h-10 w-10 bg-muted/30 border border-border/50 text-foreground shadow-sm rounded-xl hover:bg-muted/50" />
+          </div>
+
           <main className="flex-1 overflow-y-auto p-4 md:p-6 scroll-smooth">
             {children}
           </main>

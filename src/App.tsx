@@ -20,6 +20,7 @@ import ConfiguracoesPage from "./pages/ConfiguracoesPage";
 import FinanceiroPage from "./pages/FinanceiroPage"; 
 import NotFound from "./pages/NotFound";
 import PasswordGate from "./components/PasswordGate";
+import CrediarioPage from "./pages/CrediarioPage";
 
 const queryClient = new QueryClient();
 
@@ -62,6 +63,7 @@ const App = () => {
                 } />
                 
                 <Route path="/clientes" element={<ClientesPage />} />
+                <Route path="/crediario" element={<CrediarioPage />} />
                 
                 <Route path="/produtos" element={
                   <PasswordGate>

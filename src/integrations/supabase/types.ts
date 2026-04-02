@@ -81,6 +81,102 @@ export type Database = {
         }
         Relationships: []
       }
+      crediarios: {
+        Row: {
+          id: string
+          cliente_id: string
+          venda_id: string | null
+          ordem_servico_id: string | null
+          valor_total: number
+          status: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          cliente_id: string
+          venda_id?: string | null
+          ordem_servico_id?: string | null
+          valor_total: number
+          status?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          cliente_id?: string
+          venda_id?: string | null
+          ordem_servico_id?: string | null
+          valor_total?: number
+          status?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crediarios_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crediarios_venda_id_fkey"
+            columns: ["venda_id"]
+            isOneToOne: false
+            referencedRelation: "vendas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crediarios_ordem_servico_id_fkey"
+            columns: ["ordem_servico_id"]
+            isOneToOne: false
+            referencedRelation: "ordens_servico"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      crediario_parcelas: {
+        Row: {
+          id: string
+          crediario_id: string
+          numero_parcela: number
+          valor_parcela: number
+          data_vencimento: string
+          status_pagamento: string
+          data_pagamento: string | null
+          forma_pagamento: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          crediario_id: string
+          numero_parcela: number
+          valor_parcela: number
+          data_vencimento: string
+          status_pagamento?: string
+          data_pagamento?: string | null
+          forma_pagamento?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          crediario_id?: string
+          numero_parcela?: number
+          valor_parcela?: number
+          data_vencimento?: string
+          status_pagamento?: string
+          data_pagamento?: string | null
+          forma_pagamento?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crediario_parcelas_crediario_id_fkey"
+            columns: ["crediario_id"]
+            isOneToOne: false
+            referencedRelation: "crediarios"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       produto_base: {
         Row: {
           id: string
@@ -477,6 +573,7 @@ export type Database = {
           id: string
           cliente_id: string | null
           valor_total: number
+          desconto: number | null
           forma_pagamento: string
           created_at: string
         }
@@ -484,6 +581,7 @@ export type Database = {
           id?: string
           cliente_id?: string | null
           valor_total?: number
+          desconto?: number | null
           forma_pagamento?: string
           created_at?: string
         }
@@ -491,6 +589,7 @@ export type Database = {
           id?: string
           cliente_id?: string | null
           valor_total?: number
+          desconto?: number | null
           forma_pagamento?: string
           created_at?: string
         }
