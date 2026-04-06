@@ -33,6 +33,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Edit3 } from "lucide-react"; 
 
 export function AppSidebar() {
   const location = useLocation();
@@ -127,6 +128,15 @@ export function AppSidebar() {
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
+
+          <SidebarMenuItem className="mt-2 group-data-[collapsible=icon]:mt-0">
+           <SidebarMenuButton asChild isActive={isActive("/gravacao")} tooltip="Gravação a Laser" className="font-medium hover:bg-primary/5">
+         <Link to="/gravacao" onClick={handleLinkClick}>
+           <Edit3 className="h-4 w-4 text-pink-500" />
+          <span>Gravação de Copos</span>
+            </Link>
+           </SidebarMenuButton>
+            </SidebarMenuItem>
 
           {/* GRUPO 2: CADASTROS */}
           <SidebarGroup>

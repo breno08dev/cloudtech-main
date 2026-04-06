@@ -18,7 +18,6 @@ export default function RelatoriosPage() {
   const [dataFimCustom, setDataFimCustom] = useState<string>(hojeFormatoInput);
 
   const { data, isLoading, isError } = useQuery({
-    // CHAVE ATUALIZADA AQUI PARA IGNORAR O CACHE ANTIGO
     queryKey: ["relatorios_financeiros_v2", periodo, dataInicioCustom, dataFimCustom],
     queryFn: async () => {
       let dataInicio = new Date();
@@ -39,9 +38,10 @@ export default function RelatoriosPage() {
       const isoInicio = dataInicio.toISOString();
       const isoFim = dataFim.toISOString();
 
-      const { data: vendas, error: errVendas } = await supabase
+      // ADICIONADO: (supabase as any) e o campo "observacoes" para separar a Gravação
+      const { data: vendas, error: errVendas } = await (supabase as any)
         .from("vendas")
-        .select("valor_total, created_at, forma_pagamento")
+        .select("valor_total, created_at, forma_pagamento, observacoes")
         .gte("created_at", isoInicio)
         .lte("created_at", isoFim);
       if (errVendas) throw errVendas;
@@ -63,10 +63,12 @@ export default function RelatoriosPage() {
       if (errParcelas) throw errParcelas;
 
       let totalVendas = 0;
+      let totalGravacoes = 0; // NOVO: Contador de Gravações
       let totalOrdens = 0;
       let totalCrediarioRecebido = 0;
 
       let qtdVendas = 0;
+      let qtdGravacoes = 0; // NOVO: Quantidade de Gravações
       let qtdOrdens = 0;
       let qtdParcelas = 0;
 
@@ -116,8 +118,16 @@ export default function RelatoriosPage() {
 
       vendas?.forEach(v => {
         if (v.forma_pagamento === 'crediario') return;
-        totalVendas += Number(v.valor_total);
-        qtdVendas++;
+        
+        // ADICIONADO: Separação de Gravação x Venda normal
+        if (v.observacoes === "Gravação de Copos") {
+          totalGravacoes += Number(v.valor_total);
+          qtdGravacoes++;
+        } else {
+          totalVendas += Number(v.valor_total);
+          qtdVendas++;
+        }
+
         processarPagamento(v.forma_pagamento, Number(v.valor_total));
         const chave = formatador.format(new Date(v.created_at));
         if (historicoMap.has(chave)) {
@@ -149,14 +159,15 @@ export default function RelatoriosPage() {
         }
       });
 
-      const faturamentoTotal = totalVendas + totalOrdens + totalCrediarioRecebido;
-      const qtdTransacoes = qtdVendas + qtdOrdens + qtdParcelas;
+      // ADICIONADO totalGravacoes ao faturamento e transações
+      const faturamentoTotal = totalVendas + totalGravacoes + totalOrdens + totalCrediarioRecebido;
+      const qtdTransacoes = qtdVendas + qtdGravacoes + qtdOrdens + qtdParcelas;
       const ticketMedio = qtdTransacoes > 0 ? faturamentoTotal / qtdTransacoes : 0;
 
       return {
         kpis: {
-          faturamentoTotal, ticketMedio, totalVendas, totalOrdens, totalCrediarioRecebido,
-          qtdVendas, qtdOrdens, qtdParcelas
+          faturamentoTotal, ticketMedio, totalVendas, totalOrdens, totalCrediarioRecebido, totalGravacoes,
+          qtdVendas, qtdOrdens, qtdParcelas, qtdGravacoes
         },
         pagamentos: {
           pix: totalPix,
@@ -169,6 +180,7 @@ export default function RelatoriosPage() {
           { name: "Vendas (À Vista)", value: totalVendas, color: "hsl(var(--chart-1))" },
           { name: "OS (À Vista)", value: totalOrdens, color: "hsl(var(--chart-2))" },
           { name: "Crediário Recebido", value: totalCrediarioRecebido, color: "#f97316" },
+          { name: "Gravação", value: totalGravacoes, color: "#ec4899" }, // ADICIONADO NO GRÁFICO
         ]
       };
     }
@@ -179,7 +191,7 @@ export default function RelatoriosPage() {
   }
 
  const { 
-    kpis = { faturamentoTotal: 0, ticketMedio: 0, totalVendas: 0, totalOrdens: 0, totalCrediarioRecebido: 0, qtdVendas: 0, qtdOrdens: 0, qtdParcelas: 0 }, 
+    kpis = { faturamentoTotal: 0, ticketMedio: 0, totalVendas: 0, totalOrdens: 0, totalCrediarioRecebido: 0, totalGravacoes: 0, qtdVendas: 0, qtdOrdens: 0, qtdParcelas: 0, qtdGravacoes: 0 }, 
     pagamentos = { pix: 0, dinheiro: 0, credito: 0, debito: 0 },
     graficoEvolucao = [], 
     graficoDistribuicao = [] 

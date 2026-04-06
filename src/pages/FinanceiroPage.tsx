@@ -77,7 +77,7 @@ export default function FinanceiroPage() {
       if (!caixaAtual) return [];
       const { data } = await (supabase as any)
         .from("vendas")
-        .select("id, valor_total, forma_pagamento, created_at, clientes(nome)")
+        .select("id, valor_total, forma_pagamento, created_at, observacoes, clientes(nome)") // ADICIONADO: observacoes
         .gte("created_at", caixaAtual.data_abertura);
       return data || [];
     },
@@ -119,10 +119,14 @@ export default function FinanceiroPage() {
     // Vendas à vista
     vendasPdv.forEach((v: any) => {
       if (v.forma_pagamento === 'crediario') return;
+
+      // LÓGICA DE GRAVAÇÃO: Verifica se é uma gravação baseada na observação
+      const isGravacao = v.observacoes === "Gravação de Copos";
+
       lista.push({
         id: v.id,
         data: v.created_at,
-        tipo: 'venda',
+        tipo: isGravacao ? 'gravacao' : 'venda', // Aplica a tag correta
         descricao: `Pagamento: ${String(v.forma_pagamento).replace('_', ' ').toUpperCase()}`,
         cliente: v.clientes?.nome || 'Cliente Avulso',
         valor: Number(v.valor_total),
@@ -165,11 +169,12 @@ export default function FinanceiroPage() {
       const sinal = h.isSaida ? "-" : "+";
       const valorStr = `${sinal} R$ ${h.valor.toFixed(2)}`;
       const hora = new Date(h.data).toLocaleTimeString("pt-BR", {hour: '2-digit', minute:'2-digit'});
+      const labelAmigavel = getLabelTipo(h.tipo); // Usa a função para imprimir "Gravação" no PDF
       
       return `
         <tr>
           <td style="padding: 4px 0; border-bottom: 1px dotted #ccc;">${hora}</td>
-          <td style="padding: 4px 0; border-bottom: 1px dotted #ccc;">${tipo}</td>
+          <td style="padding: 4px 0; border-bottom: 1px dotted #ccc;">${labelAmigavel.toUpperCase()}</td>
           <td style="padding: 4px 0; border-bottom: 1px dotted #ccc;">${h.cliente}</td>
           <td style="padding: 4px 0; border-bottom: 1px dotted #ccc; max-width: 40mm; word-wrap: break-word;">${h.descricao}</td>
           <td style="padding: 4px 0; border-bottom: 1px dotted #ccc; text-align: right; font-weight: bold; ${cor}">${valorStr}</td>
@@ -312,12 +317,13 @@ export default function FinanceiroPage() {
     },
   });
 
-  // MUTATION PARA EXCLUIR MOVIMENTAÇÃO E REVERTER CREDIÁRIO
+  // MUTATION PARA EXCLUIR MOVIMENTAÇÃO E REVERTER CREDIÁRIO/GRAVAÇÃO/VENDA
   const excluirHistoricoMut = useMutation({
     mutationFn: async (item: any) => {
       const { id, tipo, categoria, origem_id, descricaoOriginal } = item;
 
-      if (tipo === 'venda') {
+      // ADICIONADO: Ação de exclusão para 'gravacao' funciona idêntico ao de 'venda'
+      if (tipo === 'venda' || tipo === 'gravacao') {
         const { data: itens } = await (supabase as any).from('venda_itens').select('produto_id, quantidade').eq('venda_id', id);
         
         if (itens && itens.length > 0) {
@@ -343,19 +349,16 @@ export default function FinanceiroPage() {
       } else {
         // SE FOR UM PAGAMENTO DE CREDIÁRIO, REVERTE A PARCELA!
         if (categoria === 'recebimento_crediario' && origem_id) {
-          // Extrai o número da parcela da descrição original ex: "Rec. Fiado: Parcela 2 - Breno"
           const match = descricaoOriginal?.match(/Parcela (\d+)/);
           if (match) {
             const numero_parcela = parseInt(match[1]);
             
-            // 1. Reverte a parcela para pendente
             await (supabase as any).from('crediario_parcelas').update({
               status_pagamento: 'pendente',
               data_pagamento: null,
               forma_pagamento: null
             }).eq('crediario_id', origem_id).eq('numero_parcela', numero_parcela);
             
-            // 2. Reverte o crediário principal para pendente caso estivesse quitado
             await (supabase as any).from('crediarios').update({ status: 'pendente' }).eq('id', origem_id);
           }
         }
@@ -370,7 +373,6 @@ export default function FinanceiroPage() {
       queryClient.invalidateQueries({ queryKey: ["vendas_caixa_atual"] }); 
       queryClient.invalidateQueries({ queryKey: ["movimentacoes_caixa"] }); 
       queryClient.invalidateQueries({ queryKey: ["os_caixa_atual"] }); 
-      // Invalida crediário e relatórios para tirar a parcela do faturamento
       queryClient.invalidateQueries({ queryKey: ["crediarios"] }); 
       queryClient.invalidateQueries({ queryKey: ["relatorios_financeiros_v2"] }); 
       queryClient.invalidateQueries({ queryKey: ["dashboard_metrics_v2"] }); 
@@ -454,9 +456,11 @@ export default function FinanceiroPage() {
     },
   });
 
+  // ADICIONADO: Cores de Badge específicas para Gravação
   const getBadgeClass = (tipo: string) => {
     switch (tipo) {
       case "venda": return "bg-emerald-500/10 text-emerald-600 border-emerald-500/20";
+      case "gravacao": return "bg-pink-500/10 text-pink-600 border-pink-500/20";
       case "os": return "bg-blue-500/10 text-blue-600 border-blue-500/20";
       case "entrada": case "reforco": return "bg-teal-500/10 text-teal-600 border-teal-500/20";
       case "saida": case "sangria": return "bg-red-500/10 text-red-600 border-red-500/20";
@@ -464,9 +468,11 @@ export default function FinanceiroPage() {
     }
   };
 
+  // ADICIONADO: Label amigável para Gravação
   const getLabelTipo = (tipo: string) => {
     switch (tipo) {
       case "venda": return "Venda PDV";
+      case "gravacao": return "Gravação";
       case "os": return "Serviço OS";
       case "reforco": return "Reforço";
       default: return tipo;
@@ -692,7 +698,7 @@ export default function FinanceiroPage() {
           </div>
           <DialogTitle className="text-2xl font-black mb-2 text-foreground">Excluir Registo</DialogTitle>
           <p className="text-sm text-muted-foreground font-medium mb-6 px-2">
-            {itemCaixaToDelete?.tipo === 'venda' ? 'A venda será apagada e os itens voltarão para o estoque.' : 
+            {itemCaixaToDelete?.tipo === 'venda' || itemCaixaToDelete?.tipo === 'gravacao' ? 'A venda/gravação será apagada e os itens voltarão para o estoque.' : 
              itemCaixaToDelete?.tipo === 'os' ? 'A OS será removida do caixa atual e voltará para o status "Pronto".' :
              itemCaixaToDelete?.categoria === 'recebimento_crediario' ? 'O pagamento será cancelado e a parcela voltará a ficar pendente no crediário do cliente.' :
              'Esta movimentação será apagada permanentemente do caixa.'}

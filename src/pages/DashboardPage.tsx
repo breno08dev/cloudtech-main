@@ -36,10 +36,10 @@ export default function DashboardPage() {
         { data: produtoVariacoes },
         { data: itensVenda },
         { data: pecasOs },
-        { data: parcelasPagas } // NOVO: Traz as parcelas do crediário pagas neste mês
+        { data: parcelasPagas } 
       ] = await Promise.all([
-        supabase.from("vendas").select("id, valor_total, created_at, forma_pagamento").gte("created_at", inicioMes),
-        supabase.from("ordens_servico").select("id, valor_total, data_finalizacao, status, created_at, forma_pagamento"),
+    (supabase as any).from("vendas").select("id, valor_total, created_at, forma_pagamento, observacoes").gte("created_at", inicioMes),
+    supabase.from("ordens_servico").select("id, valor_total, data_finalizacao, status, created_at, forma_pagamento"),
         (supabase as any).from("produto_base").select("id, nome"),
         (supabase as any).from("produto_variacoes").select("id, produto_id, estoque, estoque_minimo, qualidade"),
         (supabase as any).from("venda_itens").select("produto_id, quantidade").gte("created_at", inicioMes),
@@ -117,18 +117,26 @@ export default function DashboardPage() {
         .sort((a: any, b: any) => a.estoque - b.estoque);
 
       // --- 2. GRÁFICO COMBINADO (ÚLTIMOS 7 DIAS) ---
-      const historicoMap = new Map<string, { data: string; PDV: number; Serviços: number; Crediário: number }>();
+      const historicoMap = new Map<string, { data: string; PDV: number; Serviços: number; Crediário: number; Gravação: number }>();
       const formatador = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' });
 
       for (let i = 0; i < 7; i++) {
         const d = new Date(seteDiasAtras);
         d.setDate(d.getDate() + i);
-        historicoMap.set(formatador.format(d), { data: formatador.format(d), PDV: 0, Serviços: 0, Crediário: 0 });
+        // ADICIONADO a chave Gravação no map do gráfico
+        historicoMap.set(formatador.format(d), { data: formatador.format(d), PDV: 0, Serviços: 0, Crediário: 0, Gravação: 0 });
       }
 
       vendas?.filter(v => v.created_at >= isoSeteDias && v.forma_pagamento !== 'crediario').forEach(v => {
         const chave = formatador.format(new Date(v.created_at));
-        if (historicoMap.has(chave)) historicoMap.get(chave)!.PDV += Number(v.valor_total);
+        if (historicoMap.has(chave)) {
+          // SEPARAÇÃO: Se for gravação vai para a coluna Gravação, senão vai para PDV normal
+          if (v.observacoes === "Gravação de Copos") {
+            historicoMap.get(chave)!.Gravação += Number(v.valor_total);
+          } else {
+            historicoMap.get(chave)!.PDV += Number(v.valor_total);
+          }
+        }
       });
 
       ordens?.filter(o => o.status === "entregue" && o.data_finalizacao && o.data_finalizacao >= isoSeteDias && o.forma_pagamento !== 'crediario').forEach(o => {
@@ -290,12 +298,15 @@ export default function DashboardPage() {
           <CardHeader className="border-b border-border/40 pb-4 px-6 pt-6 bg-card shrink-0">
             <CardTitle className="text-base font-bold text-foreground">Entradas Financeiras (Últimos 7 dias)</CardTitle>
           </CardHeader>
-          <CardContent className="p-6 pt-8 flex-1 bg-card/30 min-h-[350px]">
+          
+          {/* CORREÇÃO DO GRÁFICO: Altura estrita h-[380px] e YAxis com largura fixa */}
+          <CardContent className="p-6 pt-8 w-full h-[380px] bg-card/30">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={graficoData} margin={{ top: 0, right: 10, left: -20, bottom: 0 }}>
+              <BarChart data={graficoData} margin={{ top: 0, right: 10, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.6} />
                 <XAxis dataKey="data" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))', fontWeight: 500 }} dy={10} />
                 <YAxis 
+                  width={80} // Fixa a largura do Eixo Y para os números não empurrarem o gráfico para o lado
                   axisLine={false} 
                   tickLine={false} 
                   tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))', fontWeight: 500 }} 
@@ -311,6 +322,7 @@ export default function DashboardPage() {
                 <Bar dataKey="PDV" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} barSize={24} />
                 <Bar dataKey="Serviços" fill="hsl(var(--status-ready))" radius={[6, 6, 0, 0]} barSize={24} />
                 <Bar dataKey="Crediário" fill="#f97316" radius={[6, 6, 0, 0]} barSize={24} />
+                <Bar dataKey="Gravação" fill="#ec4899" radius={[6, 6, 0, 0]} barSize={24} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>

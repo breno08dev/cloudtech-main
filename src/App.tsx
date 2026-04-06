@@ -21,6 +21,7 @@ import FinanceiroPage from "./pages/FinanceiroPage";
 import NotFound from "./pages/NotFound";
 import PasswordGate from "./components/PasswordGate";
 import CrediarioPage from "./pages/CrediarioPage";
+import GravacaoPage from "./pages/GravacaoPage";
 
 const queryClient = new QueryClient();
 
@@ -54,8 +55,6 @@ const App = () => {
           ) : (
             <AppLayout>
               <Routes>
-                
-                {/* Dashboard agora protegido com PasswordGate */}
                 <Route path="/" element={
                   <PasswordGate>
                     <DashboardPage />
@@ -76,6 +75,9 @@ const App = () => {
                 <Route path="/ordens/:id" element={<OrdemDetailPage />} />
                 <Route path="/vendas" element={<VendasPage />} />
                 
+                {/* ROTA DE GRAVAÇÃO: Aberta para todos (Sem PasswordGate) */}
+                <Route path="/gravacao" element={<GravacaoPage />} />
+
                 <Route path="/financeiro" element={
                   <PasswordGate>
                     <FinanceiroPage />

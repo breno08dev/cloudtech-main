@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -7,8 +7,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Label } from "@/components/ui/label";
-import { Search, Wallet, CheckCircle, Clock, ChevronDown, ChevronUp, Loader2, AlertCircle, Banknote, Smartphone, CreditCard, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import { Search, Wallet, CheckCircle, Clock, ChevronDown, ChevronUp, Loader2, AlertCircle, Banknote, Smartphone, CreditCard, ChevronLeft, ChevronRight, Trash2, Plus, ChevronsUpDown } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -26,9 +28,28 @@ export default function CrediarioPage() {
   const [parcelaToPay, setParcelaToPay] = useState<any>(null);
   const [formaPagamentoSelecionada, setFormaPagamentoSelecionada] = useState("dinheiro");
   const [crediarioToDelete, setCrediarioToDelete] = useState<{id: string, cliente: string} | null>(null);
-  
-  // NOVO: Estado para a senha de exclusão
   const [senhaAdmin, setSenhaAdmin] = useState("");
+
+  // Estados para o Modal de Lançamento
+  const [modalLancamentoOpen, setModalLancamentoOpen] = useState(false);
+  const [lancamentoForm, setLancamentoForm] = useState({ cliente_id: "", valor: "", parcelas: 1, dataVencimento: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] });
+  const [searchClienteModal, setSearchClienteModal] = useState("");
+  const [openClienteModal, setOpenClienteModal] = useState(false);
+
+  // Busca de clientes para o select
+  const { data: clientes = [] } = useQuery({
+    queryKey: ["clientes_select"],
+    queryFn: async () => {
+      const { data } = await supabase.from("clientes").select("id, nome").order("nome");
+      return data || [];
+    },
+  });
+
+  const clientesModalFiltrados = useMemo(() => {
+    if (!searchClienteModal || searchClienteModal.trim() === "") return [];
+    const termo = searchClienteModal.toLowerCase();
+    return (clientes || []).filter((c: any) => c.nome.toLowerCase().includes(termo)).slice(0, 10);
+  }, [clientes, searchClienteModal]);
 
   const { data: crediarios = [], isLoading } = useQuery({
     queryKey: ["crediarios"],
@@ -126,18 +147,95 @@ export default function CrediarioPage() {
 
   const excluirCrediarioMutation = useMutation({
     mutationFn: async (id: string) => {
+      // 1. Busca os dados do crediário para achar a venda atrelada
+      const { data: crediario } = await supabase.from("crediarios").select("venda_id, ordem_servico_id").eq("id", id).single();
+      
+      // 2. Se houver venda, estorna o estoque e exclui a venda
+      if (crediario?.venda_id) {
+        const { data: itens } = await supabase.from("venda_itens").select("produto_id, quantidade").eq("venda_id", crediario.venda_id);
+        if (itens) {
+          for (const item of itens) {
+            const { data: prod } = await supabase.from("produto_variacoes").select("estoque").eq("id", item.produto_id).single();
+            if (prod) {
+              await supabase.from("produto_variacoes").update({ estoque: prod.estoque + item.quantidade }).eq("id", item.produto_id);
+            }
+          }
+        }
+        await supabase.from("vendas").delete().eq("id", crediario.venda_id);
+      }
+
+      // 3. Faz o mesmo se for Ordem de Serviço
+      if (crediario?.ordem_servico_id) {
+        const { data: pecas } = await supabase.from("ordem_servico_pecas").select("produto_id, quantidade").eq("ordem_servico_id", crediario.ordem_servico_id);
+        if (pecas) {
+          for (const peca of pecas) {
+            const { data: prod } = await supabase.from("produto_variacoes").select("estoque").eq("id", peca.produto_id).single();
+            if (prod) {
+              await supabase.from("produto_variacoes").update({ estoque: prod.estoque + peca.quantidade }).eq("id", peca.produto_id);
+            }
+          }
+        }
+        await supabase.from("ordens_servico").delete().eq("id", crediario.ordem_servico_id);
+      }
+
+      // 4. Finalmente exclui o crediário
       const { error } = await supabase.from("crediarios").delete().eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success("Dívida apagada com sucesso!");
+      toast.success("Dívida apagada e estoque estornado com sucesso!");
       setCrediarioToDelete(null);
-      setSenhaAdmin(""); // Limpa a senha
+      setSenhaAdmin("");
       queryClient.invalidateQueries({ queryKey: ["crediarios"] });
+      queryClient.invalidateQueries({ queryKey: ["produtos_pdv"] });
+      queryClient.invalidateQueries({ queryKey: ["produtos"] });
     },
     onError: (err: any) => {
       toast.error("Erro ao excluir dívida: " + err.message);
     },
+  });
+
+  const novoLancamentoMutation = useMutation({
+    mutationFn: async () => {
+      if (!lancamentoForm.cliente_id || !lancamentoForm.valor || Number(lancamentoForm.valor) <= 0) {
+        throw new Error("Preencha o cliente e um valor válido.");
+      }
+      
+      const valorTotal = Number(lancamentoForm.valor);
+      const { data: crediario, error: credErr } = await supabase.from("crediarios").insert({
+        cliente_id: lancamentoForm.cliente_id,
+        valor_total: valorTotal,
+        status: "pendente"
+      }).select("id").single();
+
+      if (credErr) throw credErr;
+
+      const valorParcela = valorTotal / lancamentoForm.parcelas;
+      const parcelasPayload = [];
+      const dataBase = new Date(lancamentoForm.dataVencimento + "T12:00:00");
+
+      for (let i = 1; i <= lancamentoForm.parcelas; i++) {
+        const dataVenc = new Date(dataBase);
+        dataVenc.setMonth(dataVenc.getMonth() + (i - 1));
+        parcelasPayload.push({
+          crediario_id: crediario.id,
+          numero_parcela: i,
+          valor_parcela: valorParcela,
+          data_vencimento: dataVenc.toISOString().split('T')[0],
+          status_pagamento: "pendente"
+        });
+      }
+
+      const { error: parcErr } = await supabase.from("crediario_parcelas").insert(parcelasPayload);
+      if (parcErr) throw parcErr;
+    },
+    onSuccess: () => {
+      toast.success("Lançamento criado com sucesso!");
+      setModalLancamentoOpen(false);
+      setLancamentoForm({ cliente_id: "", valor: "", parcelas: 1, dataVencimento: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] });
+      queryClient.invalidateQueries({ queryKey: ["crediarios"] });
+    },
+    onError: (err: any) => toast.error(err.message),
   });
 
   const handlePagarClick = (parcela: any) => {
@@ -167,6 +265,64 @@ export default function CrediarioPage() {
   return (
     <div className="flex flex-col gap-6 pb-8 animate-in fade-in duration-500">
       
+      {/* Modal Novo Lançamento */}
+      <Dialog open={modalLancamentoOpen} onOpenChange={setModalLancamentoOpen}>
+        <DialogContent className="sm:max-w-md rounded-[2rem] p-6 border-border/40 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-black text-center mb-1">Novo Lançamento Individual</DialogTitle>
+            <p className="text-center text-sm font-medium text-muted-foreground">Registre um valor sem atrelar a produtos.</p>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label className="text-xs font-bold uppercase text-muted-foreground ml-1">Cliente</Label>
+              <Popover open={openClienteModal} onOpenChange={setOpenClienteModal}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between h-12 rounded-xl border-border/60">
+                    {lancamentoForm.cliente_id ? clientes.find((c: any) => c.id === lancamentoForm.cliente_id)?.nome : "Pesquise pelo nome..."}
+                    <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[340px] p-0 rounded-xl">
+                  <Command>
+                    <CommandInput placeholder="Digite o nome..." value={searchClienteModal} onValueChange={setSearchClienteModal} />
+                    <CommandList>
+                      {clientesModalFiltrados.length === 0 ? <CommandEmpty>Pesquise para encontrar.</CommandEmpty> : (
+                        <CommandGroup>
+                          {clientesModalFiltrados.map((c: any) => (
+                            <CommandItem key={c.id} onSelect={() => { setLancamentoForm({...lancamentoForm, cliente_id: c.id}); setOpenClienteModal(false); }}>
+                              {c.nome}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      )}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+            <div className="grid gap-2">
+              <Label className="text-xs font-bold uppercase text-muted-foreground ml-1">Valor do Lançamento (R$)</Label>
+              <Input type="number" step="0.01" value={lancamentoForm.valor} onChange={(e) => setLancamentoForm({...lancamentoForm, valor: e.target.value})} className="h-12 rounded-xl font-mono text-lg font-bold" placeholder="0.00" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label className="text-xs font-bold uppercase text-muted-foreground ml-1">Nº Parcelas</Label>
+                <Input type="number" min="1" value={lancamentoForm.parcelas} onChange={(e) => setLancamentoForm({...lancamentoForm, parcelas: Number(e.target.value)})} className="h-12 rounded-xl" />
+              </div>
+              <div className="grid gap-2">
+                <Label className="text-xs font-bold uppercase text-muted-foreground ml-1">1º Vencimento</Label>
+                <Input type="date" value={lancamentoForm.dataVencimento} onChange={(e) => setLancamentoForm({...lancamentoForm, dataVencimento: e.target.value})} className="h-12 rounded-xl" />
+              </div>
+            </div>
+          </div>
+
+          <Button onClick={() => novoLancamentoMutation.mutate()} disabled={novoLancamentoMutation.isPending} className="w-full h-12 rounded-xl font-bold bg-primary hover:bg-primary/90 text-base">
+            {novoLancamentoMutation.isPending ? <Loader2 className="animate-spin mr-2" /> : <CheckCircle className="mr-2 h-5 w-5" />} Confirmar Lançamento
+          </Button>
+        </DialogContent>
+      </Dialog>
+
       {/* Modal de Pagamento */}
       <Dialog open={!!parcelaToPay} onOpenChange={(open) => !open && setParcelaToPay(null)}>
         <DialogContent className="sm:max-w-md rounded-[2rem] p-6 border-border/40 shadow-2xl">
@@ -267,6 +423,10 @@ export default function CrediarioPage() {
           </h1>
           <p className="text-muted-foreground text-sm font-medium mt-1 ml-1">Controle os pagamentos a prazo e fiados dos seus clientes.</p>
         </div>
+        
+        <Button onClick={() => setModalLancamentoOpen(true)} className="rounded-2xl shadow-xl shadow-primary/20 bg-primary hover:bg-primary/90 font-bold h-12 px-6">
+          <Plus className="mr-2 h-5 w-5" /> Lançamento Individual
+        </Button>
       </div>
 
       {/* Barra de Pesquisa e Filtro */}

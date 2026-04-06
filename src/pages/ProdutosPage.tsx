@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Plus, Search, Pencil, Trash2, AlertTriangle, Loader2, Package, Barcode, ChevronLeft, ChevronRight, AlertCircle, Dices, Printer, Minus, ChevronsUpDown, Check } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, AlertTriangle, Loader2, Package, Barcode, ChevronLeft, ChevronRight, AlertCircle, Dices, Printer, Minus, ChevronsUpDown } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -236,7 +236,7 @@ export default function ProdutosPage() {
     setPrintList(prev => prev.map(i => i.id === id ? { ...i, qtd: Math.max(1, i.qtd + delta) } : i));
   };
 
-  // --- LÓGICA DE GERAR PDF DE ETIQUETAS (PADRÃO 4 COLUNAS) ---
+// --- LÓGICA DE GERAR PDF DE ETIQUETAS (PADRÃO PIMACO 6187 COM TEXTOS RENTES E NÚMEROS CORRIGIDOS) ---
   const imprimirEtiquetas = () => {
     if (printList.length === 0) return toast.error("Adicione pelo menos um produto para imprimir.");
 
@@ -247,9 +247,13 @@ export default function ProdutosPage() {
 
     const labelsHtml = etiquetas.map((item) => `
       <div class="label">
-        <div class="title">${item.nome}</div>
-        ${item.codigo ? `<svg class="barcode" jsbarcode-value="${item.codigo}" jsbarcode-height="25" jsbarcode-width="1.2" jsbarcode-fontsize="9" jsbarcode-margin="0" jsbarcode-displayvalue="true"></svg>` : '<div class="no-barcode">Sem Código</div>'}
-        <div class="price">R$ ${item.preco.toFixed(2)}</div>
+        <div class="content-box">
+          <div class="text-row">
+            <div class="price">R$ ${item.preco.toFixed(2)}</div>
+            <div class="title">${item.nome}</div>
+          </div>
+          ${item.codigo ? `<svg class="barcode" jsbarcode-value="${item.codigo}" jsbarcode-height="18" jsbarcode-width="1.3" jsbarcode-fontsize="7" jsbarcode-textmargin="1" jsbarcode-margin="0" jsbarcode-displayvalue="true"></svg>` : '<div class="no-barcode">Sem Código</div>'}
+        </div>
       </div>
     `).join('');
 
@@ -261,31 +265,77 @@ export default function ProdutosPage() {
         <title>Imprimir Etiquetas</title>
         <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
         <style>
-          @page { margin: 12mm 4mm; size: A4 portrait; }
-          body { margin: 0; padding: 0; font-family: Arial, sans-serif; background: #fff; }
+          @page { 
+            size: letter portrait; /* Pimaco 6187 usa folha CARTA (Letter) */
+            margin: 9.7mm 0 0 13mm; /* Margens exatas do gabarito 6187 */
+          }
+          body { 
+            margin: 0; 
+            padding: 0; 
+            font-family: Arial, sans-serif; 
+            background: #fff; 
+            -webkit-print-color-adjust: exact;
+          }
           .grid { 
             display: grid; 
-            grid-template-columns: repeat(4, 1fr); 
-            gap: 1mm 1mm; 
-            width: 100%; 
+            grid-template-columns: repeat(4, 44.45mm); 
+            grid-auto-rows: 12.7mm;
+            column-gap: 3.5mm; /* Distância exata entre as colunas na Pimaco 6187 */
+            row-gap: 0; 
+            width: fit-content;
           }
           .label {
-            border: 1px dashed #e5e5e5; 
-            padding: 2mm;
-            text-align: center;
-            height: 25.4mm;
+            width: 44.45mm;
+            height: 12.7mm;
             display: flex;
-            flex-direction: column;
-            justify-content: space-between;
+            justify-content: center;
             align-items: center;
             overflow: hidden;
             box-sizing: border-box;
-            page-break-inside: avoid;
           }
-          .title { font-size: 8px; font-weight: bold; line-height: 1.1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 100%; margin-bottom: 2px; }
-          .price { font-size: 11px; font-weight: 900; margin-top: auto; }
-          .no-barcode { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 8px; color: #999; font-weight: bold; }
-          svg { max-height: 28px; max-width: 100%; }
+          .content-box {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: stretch;
+            max-width: 42mm; 
+          }
+          .text-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            width: 100%;
+            margin-bottom: 0.5mm;
+            padding: 0 1px; 
+            box-sizing: border-box;
+          }
+          .price { 
+            font-size: 8px; 
+            font-weight: 900; 
+            line-height: 1;
+            white-space: nowrap;
+          }
+          .title { 
+            font-size: 6px; 
+            font-weight: bold; 
+            text-align: right; 
+            line-height: 1.1; 
+            white-space: nowrap; 
+            overflow: hidden; 
+            text-overflow: ellipsis; 
+            max-width: 60%;
+          }
+          .barcode {
+            height: 7.5mm; /* Aumentado para dar espaço aos números não cortarem */
+            width: auto;
+            display: block;
+          }
+          .no-barcode { 
+            text-align: center; 
+            font-size: 6px; 
+            color: #999; 
+            font-weight: bold; 
+            width: 35mm;
+          }
         </style>
       </head>
       <body>
@@ -341,8 +391,8 @@ export default function ProdutosPage() {
             <DialogTitle className="text-2xl font-black flex items-center gap-2">
               <Printer className="h-6 w-6 text-primary" /> Impressão de Etiquetas
             </DialogTitle>
-            <p className="text-sm text-muted-foreground font-medium">Selecione os produtos e a quantidade de etiquetas que deseja imprimir em folha A4.</p>
-            <p className="text-sm text-muted-foreground font-medium">Para evitar percas, o sistema recomenda 40 etiquetas por folha.</p>
+            <p className="text-sm text-muted-foreground font-medium">Selecione os produtos e a quantidade de etiquetas que deseja imprimir.</p>
+            
           </DialogHeader>
 
           <div className="space-y-4 py-4">
