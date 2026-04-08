@@ -236,146 +236,154 @@ export default function ProdutosPage() {
     setPrintList(prev => prev.map(i => i.id === id ? { ...i, qtd: Math.max(1, i.qtd + delta) } : i));
   };
 
-// --- LÓGICA DE GERAR PDF DE ETIQUETAS (PADRÃO PIMACO 6187 COM TEXTOS RENTES E NÚMEROS CORRIGIDOS) ---
-  const imprimirEtiquetas = () => {
-    if (printList.length === 0) return toast.error("Adicione pelo menos um produto para imprimir.");
+// --- ETIQUETAS PIMACO 6187 (AJUSTE FINAL COM LIMITE DO CÓDIGO) ---
+const imprimirEtiquetas = () => {
+  if (printList.length === 0) return toast.error("Adicione pelo menos um produto para imprimir.");
 
-    const etiquetas: any[] = [];
-    printList.forEach(item => {
-      for (let i = 0; i < item.qtd; i++) etiquetas.push(item);
-    });
+  const etiquetas: any[] = [];
+  printList.forEach(item => {
+    for (let i = 0; i < item.qtd; i++) etiquetas.push(item);
+  });
 
-    const labelsHtml = etiquetas.map((item) => `
-      <div class="label">
-        <div class="content-box">
-          <div class="text-row">
-            <div class="price">R$ ${item.preco.toFixed(2)}</div>
-            <div class="title">${item.nome}</div>
-          </div>
-          ${item.codigo ? `<svg class="barcode" jsbarcode-value="${item.codigo}" jsbarcode-height="18" jsbarcode-width="1.3" jsbarcode-fontsize="7" jsbarcode-textmargin="1" jsbarcode-margin="0" jsbarcode-displayvalue="true"></svg>` : '<div class="no-barcode">Sem Código</div>'}
+  const labelsHtml = etiquetas.map((item) => `
+    <div class="label">
+      <div class="content-box">
+
+        <div class="top-row">
+          <div class="title">${item.nome}</div>
+          <div class="price">R$ ${item.preco.toFixed(2)}</div>
         </div>
+
+        ${item.codigo 
+          ? `<svg class="barcode" 
+                jsbarcode-value="${item.codigo}" 
+                jsbarcode-height="20" 
+                jsbarcode-width="1.4" 
+                jsbarcode-fontsize="8" 
+                jsbarcode-textmargin="2" 
+                jsbarcode-margin="0" 
+                jsbarcode-displayvalue="true"></svg>` 
+          : '<div class="no-barcode">Sem Código</div>'}
+
       </div>
-    `).join('');
+    </div>
+  `).join('');
 
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <title>Imprimir Etiquetas</title>
-        <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
-        <style>
-          @page { 
-            size: letter portrait; /* Pimaco 6187 usa folha CARTA (Letter) */
-            margin: 9.7mm 0 0 13mm; /* Margens exatas do gabarito 6187 */
-          }
-          body { 
-            margin: 0; 
-            padding: 0; 
-            font-family: Arial, sans-serif; 
-            background: #fff; 
-            -webkit-print-color-adjust: exact;
-          }
-          .grid { 
-            display: grid; 
-            grid-template-columns: repeat(4, 44.45mm); 
-            grid-auto-rows: 12.7mm;
-            column-gap: 3.5mm; /* Distância exata entre as colunas na Pimaco 6187 */
-            row-gap: 0; 
-            width: fit-content;
-          }
-          .label {
-            width: 44.45mm;
-            height: 12.7mm;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            overflow: hidden;
-            box-sizing: border-box;
-          }
-          .content-box {
-            display: inline-flex;
-            flex-direction: column;
-            align-items: stretch;
-            max-width: 42mm; 
-          }
-          .text-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-end;
-            width: 100%;
-            margin-bottom: 0.5mm;
-            padding: 0 1px; 
-            box-sizing: border-box;
-          }
-          .price { 
-            font-size: 8px; 
-            font-weight: 900; 
-            line-height: 1;
-            white-space: nowrap;
-          }
-          .title { 
-            font-size: 6px; 
-            font-weight: bold; 
-            text-align: right; 
-            line-height: 1.1; 
-            white-space: nowrap; 
-            overflow: hidden; 
-            text-overflow: ellipsis; 
-            max-width: 60%;
-          }
-          .barcode {
-            height: 7.5mm; /* Aumentado para dar espaço aos números não cortarem */
-            width: auto;
-            display: block;
-          }
-          .no-barcode { 
-            text-align: center; 
-            font-size: 6px; 
-            color: #999; 
-            font-weight: bold; 
-            width: 35mm;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="grid">
-          ${labelsHtml}
-        </div>
-        <script>
-          window.onload = function() {
-            JsBarcode(".barcode").init();
-            setTimeout(function() {
-              window.print();
-            }, 500);
-          };
-        </script>
-      </body>
-      </html>
-    `;
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Imprimir Etiquetas</title>
+      <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0px';
-    iframe.style.height = '0px';
-    iframe.style.border = 'none';
-    document.body.appendChild(iframe);
+      <style>
+        @page { 
+          size: A4 portrait;
+          margin: 12.1mm 4mm 9.7mm 11.3mm;
+        }
 
-    const doc = iframe.contentWindow?.document;
-    if (doc) {
-      doc.open(); 
-      doc.write(htmlContent); 
-      doc.close();
+        body { 
+          margin: 0; 
+          padding: 0; 
+          font-family: Arial, sans-serif;
+        }
 
-      if (iframe.contentWindow) {
-        iframe.contentWindow.onafterprint = () => {
-          if (document.body.contains(iframe)) document.body.removeChild(iframe);
+        .grid { 
+          display: grid;
+          grid-template-columns: repeat(4, 44.45mm);
+          grid-template-rows: repeat(20, 12.7mm);
+          column-gap: 3.5mm;
+          row-gap: 0;
+        }
+
+        .label {
+          width: 44.45mm;
+          height: 12.7mm;
+          box-sizing: border-box;
+          overflow: hidden;
+          padding: 1mm;
+        }
+
+        .content-box {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+          justify-content: flex-end; 
+          padding-bottom: 1.5mm; /* 👈 desce mais um pouco */
+          align-items: center; /* 👈 centraliza baseado no código */
+        }
+
+        .top-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-end;
+          font-size: 7px;
+          font-weight: bold;
+          line-height: 1;
+          margin-bottom: 0.6mm;
+          width: 92%; /* 👈 LIMITA NA LARGURA DO CÓDIGO */
+        }
+
+        .title {
+          max-width: 70%;
+          text-align: left;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .price {
+          text-align: right;
+          white-space: nowrap;
+        }
+
+        .barcode {
+          width: 92%; /* 👈 MESMA LARGURA DO TEXTO = “parede” */
+          height: 7.5mm;
+        }
+
+        .no-barcode {
+          text-align: center;
+          font-size: 6px;
+          color: #999;
+        }
+      </style>
+    </head>
+
+    <body>
+      <div class="grid">
+        ${labelsHtml}
+      </div>
+
+      <script>
+        window.onload = function() {
+          JsBarcode(".barcode").init();
+          setTimeout(() => window.print(), 400);
         };
-      }
-    }
-  };
+      </script>
+    </body>
+    </html>
+  `;
+
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = 'none';
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow?.document;
+  if (doc) {
+    doc.open();
+    doc.write(htmlContent);
+    doc.close();
+
+    iframe.contentWindow.onafterprint = () => {
+      document.body.removeChild(iframe);
+    };
+  }
+};
 
   const totalItems = produtos.length;
   const totalPages = Math.ceil(totalItems / itemsPerPage);

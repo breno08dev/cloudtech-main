@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Label } from "@/components/ui/label";
-import { Search, Wallet, CheckCircle, Clock, ChevronDown, ChevronUp, Loader2, AlertCircle, Banknote, Smartphone, CreditCard, ChevronLeft, ChevronRight, Trash2, Plus, ChevronsUpDown } from "lucide-react";
+import { Search, Wallet, CheckCircle, Clock, ChevronDown, ChevronUp, Loader2, AlertCircle, Banknote, Smartphone, CreditCard, ChevronLeft, ChevronRight, Trash2, Plus, ChevronsUpDown, BellRing, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -262,6 +262,53 @@ export default function CrediarioPage() {
     setExpandedId(expandedId === id ? null : id);
   };
 
+  // --- LÓGICA DE ALERTAS DE VENCIMENTO ---
+  const alertasVencimento = useMemo(() => {
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const amanha = new Date(hoje);
+    amanha.setDate(amanha.getDate() + 1);
+
+    const hojeStr = hoje.toISOString().split('T')[0];
+    const amanhaStr = amanha.toISOString().split('T')[0];
+
+    const parcelas: any[] = [];
+    
+    crediarios.forEach(cred => {
+      cred.parcelas?.forEach((p: any) => {
+        if (p.status_pagamento === "pendente" && (p.data_vencimento === hojeStr || p.data_vencimento === amanhaStr)) {
+          parcelas.push({
+            ...p,
+            cliente: cred.cliente,
+            tipo: p.data_vencimento === hojeStr ? "hoje" : "amanhã"
+          });
+        }
+      });
+    });
+    
+    return parcelas.sort((a, b) => a.data_vencimento.localeCompare(b.data_vencimento));
+  }, [crediarios]);
+
+  const enviarWhatsApp = (parcela: any) => {
+    if (!parcela.cliente?.telefone) {
+      toast.error("O cliente não possui telefone cadastrado.");
+      return;
+    }
+    
+    const numeroLimpo = parcela.cliente.telefone.replace(/\D/g, '');
+    const dataFormatada = new Date(parcela.data_vencimento + 'T12:00:00').toLocaleDateString('pt-BR');
+    const valorFormatado = Number(parcela.valor_parcela).toFixed(2);
+    
+    let mensagem = "";
+    if (parcela.tipo === "hoje") {
+      mensagem = `Olá ${parcela.cliente.nome}, tudo bem? Passando para lembrar que a parcela ${parcela.numero_parcela} do seu crediário, no valor de R$ ${valorFormatado}, vence *hoje* (${dataFormatada}). Qualquer dúvida, estamos à disposição!`;
+    } else {
+      mensagem = `Olá ${parcela.cliente.nome}, tudo bem? Passando para lembrar que a parcela ${parcela.numero_parcela} do seu crediário, no valor de R$ ${valorFormatado}, vence *amanhã* (${dataFormatada}). Qualquer dúvida, estamos à disposição!`;
+    }
+
+    window.open(`https://wa.me/55${numeroLimpo}?text=${encodeURIComponent(mensagem)}`, '_blank');
+  };
+
   return (
     <div className="flex flex-col gap-6 pb-8 animate-in fade-in duration-500">
       
@@ -428,6 +475,41 @@ export default function CrediarioPage() {
           <Plus className="mr-2 h-5 w-5" /> Lançamento Individual
         </Button>
       </div>
+
+      {/* PAINEL DE ALERTAS DE VENCIMENTO */}
+      {alertasVencimento.length > 0 && (
+        <div className="bg-orange-500/10 border border-orange-500/20 rounded-[2rem] p-6 animate-in slide-in-from-top-4">
+          <div className="flex items-center gap-2 mb-4">
+            <BellRing className="h-5 w-5 text-orange-600 animate-bounce" />
+            <h2 className="text-lg font-black text-orange-600">Atenção: Vencimentos Próximos</h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {alertasVencimento.map(alerta => (
+              <div key={alerta.id} className="bg-background rounded-2xl p-4 border border-border/50 shadow-sm flex flex-col gap-3">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className={cn("text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md", alerta.tipo === "hoje" ? "bg-red-500/10 text-red-600" : "bg-orange-500/10 text-orange-600")}>
+                      Vence {alerta.tipo}
+                    </span>
+                    <p className="font-bold text-sm mt-1">{alerta.cliente?.nome}</p>
+                    <p className="text-xs text-muted-foreground font-medium">Parcela {alerta.numero_parcela}</p>
+                  </div>
+                  <p className="font-black font-mono text-lg text-primary">
+                    R$ {Number(alerta.valor_parcela).toFixed(2)}
+                  </p>
+                </div>
+                <Button 
+                  onClick={() => enviarWhatsApp(alerta)}
+                  className="w-full h-10 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold shadow-md shadow-[#25D366]/20 transition-all"
+                >
+                  <MessageCircle className="h-4 w-4 mr-2" />
+                  Avisar no WhatsApp
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Barra de Pesquisa e Filtro */}
       <div className="flex flex-col sm:flex-row gap-3 w-full">

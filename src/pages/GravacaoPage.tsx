@@ -229,6 +229,38 @@ const saveMutation = useMutation({
 
       if (vendaErr) throw vendaErr;
 
+      // 1.5 SE FOR CREDIÁRIO, REGISTRA A DÍVIDA E AS PARCELAS
+      if (formaPagamento === "crediario") {
+        if (clienteId === "avulso") throw new Error("Selecione um cliente para o crediário.");
+        
+        const { data: crediario, error: credErr } = await supabase.from("crediarios").insert({
+          cliente_id: clienteId,
+          venda_id: venda.id, // <--- IMPORTANTE: Isso garante o estorno de estoque na exclusão!
+          valor_total: totalGeral,
+          status: "pendente"
+        }).select("id").single();
+
+        if (credErr) throw credErr;
+
+        const valorParcela = totalGeral / (parcelasCrediario || 1);
+        const parcelasPayload = [];
+        const dataBase = new Date(dataVencimentoCrediario + "T12:00:00");
+
+        for (let i = 1; i <= parcelasCrediario; i++) {
+          const dataVenc = new Date(dataBase);
+          dataVenc.setMonth(dataVenc.getMonth() + (i - 1));
+          parcelasPayload.push({
+            crediario_id: crediario.id,
+            numero_parcela: i,
+            valor_parcela: valorParcela,
+            data_vencimento: dataVenc.toISOString().split('T')[0],
+            status_pagamento: "pendente"
+          });
+        }
+        const { error: parcErr } = await supabase.from("crediario_parcelas").insert(parcelasPayload);
+        if (parcErr) throw parcErr;
+      }
+
       // 2. Salva os itens gravados no banco de dados para o histórico de Vendas
       const itensParaSalvar = cart
         .filter(item => item.produto) // Salva apenas se houver produto atrelado
@@ -507,7 +539,7 @@ const saveMutation = useMutation({
               disabled={isCobrarDisabled} 
               className={cn("w-full h-14 rounded-2xl text-lg font-bold transition-all", isCobrarDisabled ? "opacity-50 cursor-not-allowed bg-muted text-muted-foreground shadow-none" : "shadow-lg shadow-primary/20 bg-primary hover:bg-primary/90")}
             >
-              Cobrar e Imprimir
+              Cobrar 
             </Button>
           </div>
         </div>
