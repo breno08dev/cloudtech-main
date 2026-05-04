@@ -251,18 +251,28 @@ export default function VendasPage() {
       `;
     }).join("");
 
-    const htmlContent = `
+   const htmlContent = `
       <!DOCTYPE html>
       <html>
       <head><meta charset="utf-8"><title>Recibo</title>
       <style>
         @page { margin: 0; size: 80mm auto; }
-        body { font-family: 'Courier New', Courier, monospace; font-size: 12px; margin: 0; padding: 5mm; color: #000; width: 70mm; }
+        
+        /* Força preto absoluto e remove suavização em TODOS os elementos */
+        body, p, span, div, h1, h2, h3, th, td {
+          color: #000000 !important;
+          -webkit-font-smoothing: none;
+          -moz-osx-font-smoothing: grayscale;
+        }
+
+        body { font-family: 'Courier New', Courier, monospace; font-size: 12px; margin: 0; padding: 5mm; width: 70mm; }
         h1, h2, h3, p { margin: 0; padding: 0; line-height: 1.2; }
         .center { text-align: center; } .right { text-align: right; } .bold { font-weight: bold; }
-        .linha { border-bottom: 1px dashed #000; margin: 8px 0; }
+        
+        /* Corrigido: Removido o 'color:' extra na declaração da borda */
+        .linha { border-bottom: 1px dashed #000000 !important; margin: 8px 0; }
         table { width: 100%; border-collapse: collapse; margin-top: 5px; }
-        th { border-bottom: 1px dashed #000; text-align: left; padding-bottom: 4px; font-weight: bold; }
+        th { border-bottom: 1px dashed #000000 !important; text-align: left; padding-bottom: 4px; font-weight: bold; }
       </style>
       </head>
       <body>
@@ -288,14 +298,14 @@ export default function VendasPage() {
         ` : ''}
         
         ${formaPagamento === 'crediario' ? `
-          <div class="center" style="margin-top: 10px; border: 1px dashed #000; padding: 5px;">
+          <div class="center" style="margin-top: 10px; border: 1px dashed #000000 !important; padding: 5px;">
             <p class="bold uppercase">Registado no Crediário</p>
             <p style="font-size: 11px;">${parcelasCrediario}x de R$ ${(cartTotal / (parcelasCrediario || 1)).toFixed(2)}</p>
             <p style="font-size: 11px;">1º Vencimento: ${new Date(dataVencimentoCrediario + 'T12:00:00').toLocaleDateString("pt-BR")}</p>
           </div>
         ` : ''}
 
-        <div class="center" style="margin-top: 20px;"><p class="bold">Obrigado pela preferencia!</p><p style="font-size: 10px; margin-top: 5px;">Sistema</p></div>
+        <div class="center" style="margin-top: 20px;"><p class="bold">Obrigado pela preferencia!</p><p style="font-size: 10px; margin-top: 5px;"></p></div>
       </body></html>
     `;
 

@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Search, Pencil, Trash2, Loader2, Users, UserCircle, ChevronLeft, ChevronRight, AlertCircle } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, Loader2, Users, UserCircle, ChevronLeft, ChevronRight, AlertCircle, Gift, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 
 interface Cliente {
@@ -23,6 +23,7 @@ interface Cliente {
   cpf_cnpj: string | null;
   tipo_cliente: string;
   observacoes: string | null;
+  data_aniversario: string | null; // NOVO CAMPO
   created_at: string;
 }
 
@@ -33,6 +34,7 @@ const clienteSchema = z.object({
   cpf_cnpj: z.string().optional(),
   tipo_cliente: z.enum(["cliente", "lojista"]).default("cliente"),
   observacoes: z.string().optional(),
+  data_aniversario: z.string().optional(), // NOVO CAMPO
 });
 
 type ClienteFormValues = z.infer<typeof clienteSchema>;
@@ -43,7 +45,8 @@ const defaultValues: ClienteFormValues = {
   whatsapp: "", 
   cpf_cnpj: "", 
   tipo_cliente: "cliente", 
-  observacoes: "" 
+  observacoes: "",
+  data_aniversario: ""
 };
 
 export default function ClientesPage() {
@@ -88,6 +91,7 @@ export default function ClientesPage() {
         cpf_cnpj: payload.cpf_cnpj || null,
         tipo_cliente: payload.tipo_cliente,
         observacoes: payload.observacoes || null,
+        data_aniversario: payload.data_aniversario || null, // NOVO CAMPO NO PAYLOAD
       };
 
       if (editId) {
@@ -137,7 +141,8 @@ export default function ClientesPage() {
       whatsapp: c.whatsapp || "", 
       cpf_cnpj: c.cpf_cnpj || "", 
       tipo_cliente: (c.tipo_cliente as "cliente" | "lojista") || "cliente", 
-      observacoes: c.observacoes || "" 
+      observacoes: c.observacoes || "",
+      data_aniversario: c.data_aniversario || ""
     });
     setEditId(c.id);
     setDialogOpen(true);
@@ -150,6 +155,35 @@ export default function ClientesPage() {
       setEditId(null);
     }
   }
+
+  // --- LÓGICA DE ANIVERSARIANTES DO DIA ---
+  const hoje = new Date();
+  const mesHoje = (hoje.getMonth() + 1).toString().padStart(2, '0');
+  const diaHoje = hoje.getDate().toString().padStart(2, '0');
+
+  const aniversariantesDoDia = clientes.filter(c => {
+    if (!c.data_aniversario) return false;
+    // O formato no banco é YYYY-MM-DD
+    const partes = c.data_aniversario.split('-');
+    if (partes.length === 3) {
+      return partes[1] === mesHoje && partes[2] === diaHoje;
+    }
+    return false;
+  });
+
+  const enviarMensagemAniversario = (nome: string, numeroUrl: string | null) => {
+    if (!numeroUrl) {
+      toast.error("Cliente não possui número de WhatsApp cadastrado.");
+      return;
+    }
+    
+    // Limpa a formatação do número para a URL do WhatsApp
+    const numeroLimpo = numeroUrl.replace(/\D/g, '');
+    
+    const mensagem = `Olá, ${nome}!  Hoje é um dia muito especial!\n\nNós da Cloud Tech desejamos tudo de melhor na sua vida, muita alegria e sucesso. Que você possa aproveitar muito o seu dia!\n\nComo forma de agradecimento pela parceria, você ganhou um chaveiro personalizado da nossa loja. \n\nÉ só dar uma passadinha aqui na loja (Avenida Cristo Redentor 573 - Posto Iguatemi) e retirar o seu. Um grande abraço de toda a equipe!`;
+    
+    window.open(`https://wa.me/55${numeroLimpo}?text=${encodeURIComponent(mensagem)}`, '_blank');
+  };
 
   // --- LÓGICA DE PAGINAÇÃO ---
   const totalItems = clientes.length;
@@ -179,6 +213,34 @@ export default function ClientesPage() {
         </DialogContent>
       </Dialog>
 
+      {/* ALERTAS DE ANIVERSARIANTES DO DIA */}
+      {aniversariantesDoDia.length > 0 && (
+        <div className="flex flex-col gap-3 mb-2 animate-in slide-in-from-top-4">
+          {aniversariantesDoDia.map(c => (
+            <Card key={`aniv-${c.id}`} className="rounded-[2rem] border-pink-500/30 bg-gradient-to-r from-pink-500/10 via-purple-500/5 to-transparent shadow-sm">
+              <CardContent className="p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="bg-pink-500/20 p-3 rounded-full">
+                    <Gift className="h-6 w-6 text-pink-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-lg text-foreground">Hoje é o aniversário de {c.nome}! 🎉</h3>
+                    <p className="text-sm font-medium text-muted-foreground">Não esqueça de enviar a mensagem de parabéns e o presente da loja.</p>
+                  </div>
+                </div>
+                <Button 
+                  onClick={() => enviarMensagemAniversario(c.nome, c.whatsapp || c.telefone)}
+                  className="rounded-xl h-11 font-bold bg-green-500 hover:bg-green-600 text-white shadow-lg shadow-green-500/20 shrink-0 w-full sm:w-auto"
+                >
+                  <MessageCircle className="h-4 w-4 mr-2" />
+                  Enviar Parabéns
+                </Button>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
       {/* Cabeçalho Premium */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card/60 border border-border/40 p-6 rounded-[2rem] backdrop-blur-xl shadow-sm shrink-0">
         <div>
@@ -198,7 +260,7 @@ export default function ClientesPage() {
             </Button>
           </DialogTrigger>
           
-          <DialogContent className="sm:max-w-lg rounded-[2rem] border-border/40 shadow-2xl p-0 overflow-hidden">
+          <DialogContent className="sm:max-w-xl rounded-[2rem] border-border/40 shadow-2xl p-0 overflow-hidden">
             <div className="bg-muted/30 p-6 pb-4 border-b border-border/40">
               <DialogTitle className="text-2xl font-black flex items-center gap-2">
                 <UserCircle className="h-6 w-6 text-primary" />
@@ -206,7 +268,7 @@ export default function ClientesPage() {
               </DialogTitle>
             </div>
             
-            <form onSubmit={handleSubmit(onSubmit)} className="grid gap-5 p-6 pt-4 bg-background">
+            <form onSubmit={handleSubmit(onSubmit)} className="grid gap-5 p-6 pt-4 bg-background max-h-[80vh] overflow-y-auto">
               <div className="grid gap-1.5">
                 <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Nome Completo / Empresa *</Label>
                 <Input {...register("nome")} className={`h-12 rounded-xl bg-card border-border/60 focus-visible:ring-primary shadow-sm ${errors.nome ? "border-red-500 focus-visible:ring-red-500" : ""}`} />
@@ -224,29 +286,34 @@ export default function ClientesPage() {
                 </div>
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-1.5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="grid gap-1.5 sm:col-span-2">
                   <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">CPF / CNPJ</Label>
                   <Input {...register("cpf_cnpj")} className="h-12 rounded-xl bg-card border-border/60 focus-visible:ring-primary shadow-sm font-mono" />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Categoria de Cliente</Label>
-                  <Controller
-                    control={control}
-                    name="tipo_cliente"
-                    render={({ field }) => (
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <SelectTrigger className="h-12 rounded-xl bg-card border-border/60 focus:ring-primary shadow-sm font-bold">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="rounded-2xl border-border/50 shadow-xl">
-                          <SelectItem value="cliente" className="py-3 font-medium cursor-pointer">Cliente Final</SelectItem>
-                          <SelectItem value="lojista" className="py-3 font-bold text-primary cursor-pointer">Lojista (Preço Especial)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    )}
-                  />
+                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Nascimento</Label>
+                  <Input type="date" {...register("data_aniversario")} className="h-12 rounded-xl bg-card border-border/60 focus-visible:ring-primary shadow-sm font-medium" />
                 </div>
+              </div>
+
+              <div className="grid gap-1.5">
+                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Categoria de Cliente</Label>
+                <Controller
+                  control={control}
+                  name="tipo_cliente"
+                  render={({ field }) => (
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger className="h-12 rounded-xl bg-card border-border/60 focus:ring-primary shadow-sm font-bold">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-2xl border-border/50 shadow-xl">
+                        <SelectItem value="cliente" className="py-3 font-medium cursor-pointer">Cliente Final</SelectItem>
+                        <SelectItem value="lojista" className="py-3 font-bold text-primary cursor-pointer">Lojista (Preço Especial)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
               </div>
               
               <div className="grid gap-1.5">
@@ -275,7 +342,7 @@ export default function ClientesPage() {
           value={search} 
           onChange={(e) => {
             setSearch(e.target.value);
-            setCurrentPage(1); // Volta para a página 1 ao pesquisar
+            setCurrentPage(1);
           }} 
         />
       </div>
@@ -290,6 +357,7 @@ export default function ClientesPage() {
                   <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black py-5 pl-6">Nome do Cliente</TableHead>
                   <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black">Contato</TableHead>
                   <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black">CPF / CNPJ</TableHead>
+                  <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black">Nascimento</TableHead>
                   <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black">Tipo</TableHead>
                   <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground/80 font-black text-right pr-6">Ações</TableHead>
                 </TableRow>
@@ -297,7 +365,7 @@ export default function ClientesPage() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="h-64 text-center">
+                    <TableCell colSpan={6} className="h-64 text-center">
                       <div className="flex flex-col items-center justify-center gap-3">
                         <Loader2 className="h-8 w-8 animate-spin text-primary" />
                         <span className="text-sm font-bold text-muted-foreground">A carregar clientes...</span>
@@ -306,13 +374,13 @@ export default function ClientesPage() {
                   </TableRow>
                 ) : isError ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="h-64 text-center text-destructive font-bold bg-destructive/5">
+                    <TableCell colSpan={6} className="h-64 text-center text-destructive font-bold bg-destructive/5">
                       Erro ao carregar os clientes.
                     </TableCell>
                   </TableRow>
                 ) : paginatedClientes.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-16">
+                    <TableCell colSpan={6} className="text-center py-16">
                       <div className="flex flex-col items-center gap-2">
                         <Users className="h-10 w-10 opacity-20 mb-2" />
                         <span className="font-bold text-lg text-muted-foreground">Nenhum cliente encontrado.</span>
@@ -327,6 +395,9 @@ export default function ClientesPage() {
                         {c.telefone || c.whatsapp || "—"}
                       </TableCell>
                       <TableCell className="font-mono text-sm text-muted-foreground font-medium">{c.cpf_cnpj || "—"}</TableCell>
+                      <TableCell className="font-mono text-sm text-muted-foreground font-medium">
+                        {c.data_aniversario ? new Date(`${c.data_aniversario}T00:00:00`).toLocaleDateString('pt-BR') : "—"}
+                      </TableCell>
                       <TableCell>
                         <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wider border shadow-sm ${
                           c.tipo_cliente === "lojista" 

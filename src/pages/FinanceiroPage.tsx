@@ -77,7 +77,7 @@ export default function FinanceiroPage() {
       if (!caixaAtual) return [];
       const { data } = await (supabase as any)
         .from("vendas")
-        .select("id, valor_total, forma_pagamento, created_at, observacoes, clientes(nome)") // ADICIONADO: observacoes
+        .select("id, valor_total, forma_pagamento, created_at, observacoes, clientes(nome)")
         .gte("created_at", caixaAtual.data_abertura);
       return data || [];
     },
@@ -107,8 +107,8 @@ export default function FinanceiroPage() {
       id: m.id,
       data: m.created_at,
       tipo: m.tipo,
-      categoria: m.categoria, // Necessário para a exclusão do crediário
-      origem_id: m.origem_id, // Necessário para identificar o crediário
+      categoria: m.categoria,
+      origem_id: m.origem_id,
       descricaoOriginal: m.descricao,
       descricao: m.categoria + (m.descricao ? ` - ${m.descricao}` : ''),
       cliente: '—',
@@ -120,13 +120,12 @@ export default function FinanceiroPage() {
     vendasPdv.forEach((v: any) => {
       if (v.forma_pagamento === 'crediario') return;
 
-      // LÓGICA DE GRAVAÇÃO: Verifica se é uma gravação baseada na observação
       const isGravacao = v.observacoes === "Gravação de Copos";
 
       lista.push({
         id: v.id,
         data: v.created_at,
-        tipo: isGravacao ? 'gravacao' : 'venda', // Aplica a tag correta
+        tipo: isGravacao ? 'gravacao' : 'venda',
         descricao: `Pagamento: ${String(v.forma_pagamento).replace('_', ' ').toUpperCase()}`,
         cliente: v.clientes?.nome || 'Cliente Avulso',
         valor: Number(v.valor_total),
@@ -164,12 +163,11 @@ export default function FinanceiroPage() {
     const dataAtual = new Date().toLocaleString("pt-BR");
 
     const linhasHistorico = historicoCaixa.map(h => {
-      const tipo = h.isSaida ? "SAIDA" : "ENTRADA";
       const cor = h.isSaida ? "color: red;" : "color: green;";
       const sinal = h.isSaida ? "-" : "+";
       const valorStr = `${sinal} R$ ${h.valor.toFixed(2)}`;
       const hora = new Date(h.data).toLocaleTimeString("pt-BR", {hour: '2-digit', minute:'2-digit'});
-      const labelAmigavel = getLabelTipo(h.tipo); // Usa a função para imprimir "Gravação" no PDF
+      const labelAmigavel = getLabelTipo(h.tipo); 
       
       return `
         <tr>
@@ -251,6 +249,146 @@ export default function FinanceiroPage() {
     }
   };
 
+ // ================= IMPRIMIR RECIBO INDIVIDUAL (COM BUSCA DE ITENS) =================
+  const imprimirVia = async (item: any) => {
+    const toastId = toast.loading("Preparando comprovante...");
+    
+    try {
+      const nomeEmpresa = config?.nome_empresa || "MINHA EMPRESA";
+      const dataAtual = new Date(item.data).toLocaleString("pt-BR");
+      const tipo = getLabelTipo(item.tipo).toUpperCase();
+      
+      let detalhesHTML = `<p style="margin-top: 0;">${item.descricao}</p>`;
+
+      // Se for Venda ou Gravação, busca os itens para sair detalhado no recibo!
+      if (item.tipo === 'venda' || item.tipo === 'gravacao') {
+        const { data: itens } = await (supabase as any).from('venda_itens').select('*').eq('venda_id', item.id);
+        
+        if (itens && itens.length > 0) {
+          const produtoIds = [...new Set(itens.map((i: any) => i.produto_id).filter(Boolean))];
+          const mapProdutos = new Map();
+          
+          if (produtoIds.length > 0) {
+            const { data: p1 } = await (supabase as any).from("produto_base").select("*").in("id", produtoIds);
+            p1?.forEach((p: any) => mapProdutos.set(p.id, { nome: p.nome }));
+            
+            const { data: p2 } = await (supabase as any).from("produto_variacoes").select("*").in("id", produtoIds);
+            const parentIds = p2?.map((v: any) => v.produto_id || v.produto_base_id || v.base_id).filter(Boolean) || [];
+            
+            let parentProds: any[] = [];
+            if (parentIds.length > 0) {
+              const { data: pParents } = await (supabase as any).from("produto_base").select("*").in("id", parentIds);
+              parentProds = pParents || [];
+            }
+            const mapParents = new Map();
+            parentProds.forEach((p: any) => mapParents.set(p.id, p));
+
+            p2?.forEach((v: any) => {
+              const parentId = v.produto_id || v.produto_base_id || v.base_id;
+              const parent = mapParents.get(parentId);
+              const nomeFinal = v.nome && v.nome !== 'Única' && v.nome !== 'Padrão'
+                ? `${parent?.nome || ''} - ${v.nome}`.trim() 
+                : (parent?.nome || v.nome || 'Produto Não Identificado');
+              
+              mapProdutos.set(v.id, {
+                nome: nomeFinal.startsWith('- ') ? nomeFinal.substring(2) : nomeFinal
+              });
+            });
+          }
+
+          detalhesHTML = `
+            <p class="bold" style="margin-bottom: 2px;">ITENS DA VENDA:</p>
+            <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 8px;">
+              <thead>
+                <tr>
+                  <th style="text-align: left; border-bottom: 1px dashed #000; padding-bottom: 2px;">Produto</th>
+                  <th style="text-align: center; border-bottom: 1px dashed #000; padding-bottom: 2px;">Qtd</th>
+                  <th style="text-align: right; border-bottom: 1px dashed #000; padding-bottom: 2px;">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itens.map((i: any) => {
+                  const nome = mapProdutos.get(i.produto_id)?.nome || 'Produto Não Identificado';
+                  const valorTotalItem = i.valor_total || i.valor || i.subtotal || 0;
+                  return `
+                    <tr>
+                      <td style="padding: 3px 0; border-bottom: 1px dotted #ccc;">${nome}</td>
+                      <td style="padding: 3px 0; border-bottom: 1px dotted #ccc; text-align: center;">${i.quantidade}</td>
+                      <td style="padding: 3px 0; border-bottom: 1px dotted #ccc; text-align: right;">R$ ${Number(valorTotalItem).toFixed(2)}</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+            <p style="margin-top: 5px; font-size: 10px; color: #555;">${item.descricao}</p>
+          `;
+        }
+      }
+
+      const htmlContent = `
+        <html>
+          <head>
+            <title>Recibo - ${tipo}</title>
+            <style>
+              body { font-family: monospace; font-size: 12px; margin: 0; padding: 10px; width: 80mm; color: #000; }
+              .center { text-align: center; }
+              .bold { font-weight: bold; }
+              .linha { border-bottom: 1px dashed #000; margin: 8px 0; }
+              .flex-between { display: flex; justify-content: space-between; }
+            </style>
+          </head>
+          <body>
+            <div class="center">
+              <h2 class="bold" style="margin: 0; font-size: 16px;">${nomeEmpresa}</h2>
+              <p style="margin: 5px 0;">----------------------------------</p>
+              <p class="bold" style="font-size: 14px; margin: 5px 0;">COMPROVANTE DE ${tipo}</p>
+            </div>
+            
+            <div class="linha"></div>
+            
+            <p class="flex-between" style="margin: 3px 0;"><span>Data:</span> <span>${dataAtual}</span></p>
+            <p class="flex-between" style="margin: 3px 0;"><span>Cliente:</span> <span>${item.cliente}</span></p>
+            
+            <div class="linha"></div>
+            
+            ${detalhesHTML}
+            
+            <div class="linha"></div>
+            
+            <h2 class="flex-between bold" style="font-size: 16px; margin: 5px 0;">
+              <span>TOTAL:</span>
+              <span>R$ ${Number(item.valor).toFixed(2)}</span>
+            </h2>
+            
+            <div class="linha"></div>
+            <p class="center" style="margin-top: 15px; font-size: 11px;">Obrigado e volte sempre!</p>
+            <p class="center" style="margin-top: 15px;">.</p>
+          </body>
+        </html>
+      `;
+
+      // Atualiza o toast para "success" e ele some sozinho!
+      toast.success("Comprovante gerado com sucesso!", { id: toastId });
+
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'absolute'; iframe.style.width = '0px'; iframe.style.height = '0px'; iframe.style.border = 'none';
+      document.body.appendChild(iframe);
+      const doc = iframe.contentWindow?.document;
+      
+      if (doc) {
+        doc.open(); doc.write(htmlContent); doc.close();
+        setTimeout(() => { 
+          iframe.contentWindow?.focus(); 
+          iframe.contentWindow?.print(); 
+          setTimeout(() => { document.body.removeChild(iframe); }, 2000); 
+        }, 500);
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error("Falha ao gerar o comprovante.", { id: toastId });
+    }
+  };
+
   // ================= 2. DADOS DOS CUSTOS =================
   const { data: custos = [], isLoading: loadingCustos } = useQuery({
     queryKey: ["custos_empresa"],
@@ -283,6 +421,7 @@ export default function FinanceiroPage() {
   const lancarMovMut = useMutation({
     mutationFn: async () => {
       if (movForm.valor <= 0) throw new Error("Valor inválido");
+      
       const { error } = await (supabase as any).from("movimentacoes_caixa").insert({
         caixa_id: caixaAtual.id,
         tipo: movForm.tipo,
@@ -291,6 +430,15 @@ export default function FinanceiroPage() {
         descricao: movForm.descricao
       });
       if (error) throw error;
+
+      // ADICIONADO: SE FOR SANGRIA, SALVA NA TABELA SANGRIAS TAMBÉM
+      if (movForm.tipo === "sangria") {
+        const { error: errSangria } = await (supabase as any).from("sangrias").insert({
+          valor: movForm.valor,
+          observacao: movForm.categoria + (movForm.descricao ? ` - ${movForm.descricao}` : '')
+        });
+        if (errSangria) console.error("Erro ao salvar sangria na tabela:", errSangria);
+      }
     },
     onSuccess: () => { 
       toast.success("Lançamento Registado", { description: "A movimentação foi adicionada ao caixa atual com sucesso." }); 
@@ -317,12 +465,10 @@ export default function FinanceiroPage() {
     },
   });
 
-  // MUTATION PARA EXCLUIR MOVIMENTAÇÃO E REVERTER CREDIÁRIO/GRAVAÇÃO/VENDA
   const excluirHistoricoMut = useMutation({
     mutationFn: async (item: any) => {
-      const { id, tipo, categoria, origem_id, descricaoOriginal } = item;
+      const { id, tipo, categoria, origem_id, descricaoOriginal, descricao, valor } = item;
 
-      // ADICIONADO: Ação de exclusão para 'gravacao' funciona idêntico ao de 'venda'
       if (tipo === 'venda' || tipo === 'gravacao') {
         const { data: itens } = await (supabase as any).from('venda_itens').select('produto_id, quantidade').eq('venda_id', id);
         
@@ -346,8 +492,15 @@ export default function FinanceiroPage() {
         }).eq('id', id);
         if (error) throw error;
         
+      } else if (tipo === 'sangria') {
+        // DROPA DA TABELA SANGRIAS
+        await (supabase as any).from('sangrias').delete().eq('valor', valor).eq('observacao', descricao);
+        
+        // DROPA DA MOVIMENTAÇÃO DO CAIXA
+        const { error } = await (supabase as any).from('movimentacoes_caixa').delete().eq('id', id);
+        if (error) throw error;
+
       } else {
-        // SE FOR UM PAGAMENTO DE CREDIÁRIO, REVERTE A PARCELA!
         if (categoria === 'recebimento_crediario' && origem_id) {
           const match = descricaoOriginal?.match(/Parcela (\d+)/);
           if (match) {
@@ -374,8 +527,7 @@ export default function FinanceiroPage() {
       queryClient.invalidateQueries({ queryKey: ["movimentacoes_caixa"] }); 
       queryClient.invalidateQueries({ queryKey: ["os_caixa_atual"] }); 
       queryClient.invalidateQueries({ queryKey: ["crediarios"] }); 
-      queryClient.invalidateQueries({ queryKey: ["relatorios_financeiros_v2"] }); 
-      queryClient.invalidateQueries({ queryKey: ["dashboard_metrics_v2"] }); 
+      queryClient.invalidateQueries({ queryKey: ["relatorios_financeiros_v3"] }); 
     },
     onError: (err: any) => toast.error("Erro ao excluir", { description: err.message })
   });
@@ -456,7 +608,6 @@ export default function FinanceiroPage() {
     },
   });
 
-  // ADICIONADO: Cores de Badge específicas para Gravação
   const getBadgeClass = (tipo: string) => {
     switch (tipo) {
       case "venda": return "bg-emerald-500/10 text-emerald-600 border-emerald-500/20";
@@ -468,7 +619,6 @@ export default function FinanceiroPage() {
     }
   };
 
-  // ADICIONADO: Label amigável para Gravação
   const getLabelTipo = (tipo: string) => {
     switch (tipo) {
       case "venda": return "Venda PDV";
@@ -537,7 +687,7 @@ export default function FinanceiroPage() {
                       <TableHead className="font-bold py-4 text-xs uppercase tracking-wider">Cliente</TableHead>
                       <TableHead className="font-bold py-4 text-xs uppercase tracking-wider">Detalhes</TableHead>
                       <TableHead className="font-bold py-4 text-xs uppercase tracking-wider text-right pr-6">Valor</TableHead>
-                      <TableHead className="w-12"></TableHead>
+                      <TableHead className="w-24"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -547,7 +697,7 @@ export default function FinanceiroPage() {
                         <TableCell colSpan={6} className="text-center py-10 text-muted-foreground font-medium">Nenhuma venda ou movimentação registada nesta sessão.</TableCell></TableRow>
                     ) : (
                       historicoCaixa.map((h: any) => (
-                        <TableRow key={`${h.tipo}-${h.id}`} className="border-border/20">
+                        <TableRow key={`${h.tipo}-${h.id}`} className="border-border/20 group">
                           <TableCell className="font-medium text-xs text-muted-foreground pl-6">{new Date(h.data).toLocaleTimeString("pt-BR", {hour: '2-digit', minute:'2-digit'})}</TableCell>
                           <TableCell>
                             <span className={cn("px-2.5 py-1 rounded-md text-[10px] font-bold uppercase border", getBadgeClass(h.tipo))}>
@@ -559,15 +709,25 @@ export default function FinanceiroPage() {
                           <TableCell className={cn("text-right font-mono font-black text-[15px] pr-6", h.isSaida ? "text-red-500" : "text-emerald-600")}>
                             {h.isSaida ? "- " : "+ "}R$ {Number(h.valor).toFixed(2)}
                           </TableCell>
-                          <TableCell>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              onClick={() => setItemCaixaToDelete(h)} 
-                              className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                          <TableCell className="text-right pr-4">
+                            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => imprimirVia(h)} 
+                                className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                              >
+                                <Printer className="h-4 w-4" />
+                              </Button>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => setItemCaixaToDelete(h)} 
+                                className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))

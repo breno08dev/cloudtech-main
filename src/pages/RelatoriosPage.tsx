@@ -5,20 +5,30 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell, Legend } from "recharts";
-import { BarChart3, TrendingUp, DollarSign, Wrench, ShoppingCart, Loader2, Calendar, Smartphone, Banknote, CreditCard, BookOpenCheck } from "lucide-react";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
+import { BarChart3, TrendingUp, DollarSign, Wrench, ShoppingCart, Loader2, Calendar, Printer, Smartphone, Banknote, CreditCard, BookOpenCheck, ArrowDownCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 type Periodo = "7d" | "30d" | "ano" | "custom";
 
 export default function RelatoriosPage() {
   const [periodo, setPeriodo] = useState<Periodo>("30d");
+  const [printMode, setPrintMode] = useState<'vendas' | 'produtos' | null>(null);
   
   const hojeFormatoInput = new Date().toISOString().split('T')[0];
   const [dataInicioCustom, setDataInicioCustom] = useState<string>(hojeFormatoInput);
   const [dataFimCustom, setDataFimCustom] = useState<string>(hojeFormatoInput);
 
+  const handlePrint = (mode: 'vendas' | 'produtos') => {
+    setPrintMode(mode);
+    setTimeout(() => {
+      window.print();
+      setTimeout(() => setPrintMode(null), 500);
+    }, 300);
+  };
+
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["relatorios_financeiros_v2", periodo, dataInicioCustom, dataFimCustom],
+    queryKey: ["relatorios_financeiros_v3", periodo, dataInicioCustom, dataFimCustom],
     queryFn: async () => {
       let dataInicio = new Date();
       let dataFim = new Date(); 
@@ -38,13 +48,89 @@ export default function RelatoriosPage() {
       const isoInicio = dataInicio.toISOString();
       const isoFim = dataFim.toISOString();
 
-      // ADICIONADO: (supabase as any) e o campo "observacoes" para separar a Gravação
+      // 1. Busca de Vendas
       const { data: vendas, error: errVendas } = await (supabase as any)
         .from("vendas")
-        .select("valor_total, created_at, forma_pagamento, observacoes")
+        .select("id, valor_total, created_at, forma_pagamento, observacoes, desconto") // <- DESCONTO ADICIONADO AQUI
         .gte("created_at", isoInicio)
-        .lte("created_at", isoFim);
+        .lte("created_at", isoFim)
+        .order("created_at", { ascending: false });
       if (errVendas) throw errVendas;
+
+      const vendasIds = vendas?.map((v: any) => v.id).filter(Boolean) || [];
+      let itensMapeados: any[] = [];
+      
+      // 2. Busca Segura dos Itens e Produtos
+      if (vendasIds.length > 0) {
+        const { data: itens, error: errItens } = await (supabase as any)
+          .from("venda_itens")
+          .select("*")
+          .in("venda_id", vendasIds);
+          
+        if (!errItens && itens) {
+          const produtoIds = [...new Set(itens.map((i: any) => i.produto_id).filter(Boolean))];
+          const mapProdutos = new Map();
+          
+          if (produtoIds.length > 0) {
+            const { data: p1 } = await (supabase as any).from("produto_base").select("*").in("id", produtoIds);
+            p1?.forEach((p: any) => mapProdutos.set(p.id, { 
+              nome: p.nome, 
+              codigo_barras: p.codigo_barras_base || p.codigo_barras_especifico || p.codigo_barras || '-' 
+            }));
+            
+            const { data: p2 } = await (supabase as any).from("produto_variacoes").select("*").in("id", produtoIds);
+            
+            const parentIds = p2?.map((v: any) => v.produto_id || v.produto_base_id || v.base_id).filter(Boolean) || [];
+            let parentProds: any[] = [];
+            
+            if (parentIds.length > 0) {
+              const { data: pParents } = await (supabase as any).from("produto_base").select("*").in("id", parentIds);
+              parentProds = pParents || [];
+            }
+            const mapParents = new Map();
+            parentProds.forEach((p: any) => mapParents.set(p.id, p));
+
+            p2?.forEach((v: any) => {
+              const parentId = v.produto_id || v.produto_base_id || v.base_id;
+              const parent = mapParents.get(parentId);
+              
+              const nomeFinal = v.nome && v.nome !== 'Única' && v.nome !== 'Padrão'
+                ? `${parent?.nome || ''} - ${v.nome}`.trim() 
+                : (parent?.nome || v.nome || 'Produto Não Identificado');
+              
+              const codigoBarrasFinal = v.codigo_barras_especifico || v.codigo_barras_base || v.codigo_barras || parent?.codigo_barras_base || parent?.codigo_barras || '-';
+              
+              mapProdutos.set(v.id, {
+                nome: nomeFinal.startsWith('- ') ? nomeFinal.substring(2) : nomeFinal,
+                codigo_barras: codigoBarrasFinal
+              });
+            });
+          }
+
+       // Mudamos para mapear a Venda inteira (assim pegamos a data E o desconto)
+          const mapaVendas = new Map();
+          vendas?.forEach((v: any) => mapaVendas.set(v.id, v));
+
+          itensMapeados = itens.map((item: any) => {
+            const prod = mapProdutos.get(item.produto_id) || {};
+            const vendaVinculada = mapaVendas.get(item.venda_id) || {};
+            
+            // Puxando o desconto direto da Venda vinculada
+            const descontoConvertido = Number(vendaVinculada.desconto) || Number(vendaVinculada.valor_desconto) || 0;
+            const valorConvertido = Number(item.valor_total) || Number(item.valor) || Number(item.preco_unitario) || Number(item.subtotal) || 0;
+
+            return {
+              id: item.id || Math.random().toString(),
+              data: vendaVinculada.created_at,
+              codigo_barras: prod.codigo_barras || '-',
+              produto: prod.nome || 'Produto Não Identificado',
+              quantidade: item.quantidade || 1,
+              desconto: descontoConvertido,
+              valor: valorConvertido,
+            };
+          }).sort((a: any, b: any) => new Date(b.data || 0).getTime() - new Date(a.data || 0).getTime());
+        }
+      }
 
       const { data: ordens, error: errOrdens } = await supabase
         .from("ordens_servico")
@@ -62,25 +148,44 @@ export default function RelatoriosPage() {
         .lte("data_pagamento", isoFim);
       if (errParcelas) throw errParcelas;
 
-      let totalVendas = 0;
-      let totalGravacoes = 0; // NOVO: Contador de Gravações
-      let totalOrdens = 0;
-      let totalCrediarioRecebido = 0;
+      const { data: sangrias, error: errSangrias } = await (supabase as any)
+        .from("sangrias")
+        .select("id, valor, created_at, observacao")
+        .gte("created_at", isoInicio)
+        .lte("created_at", isoFim);
+      if (errSangrias) console.error("Erro ao buscar sangrias:", errSangrias);
 
-      let qtdVendas = 0;
-      let qtdGravacoes = 0; // NOVO: Quantidade de Gravações
-      let qtdOrdens = 0;
-      let qtdParcelas = 0;
+      let totalVendas = 0, totalGravacoes = 0, totalOrdens = 0, totalCrediarioRecebido = 0, totalSangrias = 0;
+      let qtdVendas = 0, qtdGravacoes = 0, qtdOrdens = 0, qtdParcelas = 0, qtdSangrias = 0;
+      let totalPix = 0, totalDinheiro = 0, totalCredito = 0, totalDebito = 0;
 
-      let totalPix = 0;
-      let totalDinheiro = 0;
-      let totalCredito = 0;
-      let totalDebito = 0;
+      const historicoGeral = [
+        ...(vendas || []).map((v: any) => ({
+          id: v.id,
+          created_at: v.created_at,
+          forma_pagamento: v.forma_pagamento,
+          observacoes: v.observacoes,
+          valor_total: v.valor_total,
+          tipo: 'venda'
+        })),
+        ...(sangrias || []).map((s: any) => ({
+          id: s.id || Math.random().toString(),
+          created_at: s.created_at,
+          forma_pagamento: 'sangria',
+          observacoes: s.observacao,
+          valor_total: s.valor,
+          tipo: 'sangria'
+        }))
+      ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      sangrias?.forEach((s: any) => {
+        totalSangrias += Number(s.valor || 0);
+        qtdSangrias++;
+      });
 
       const processarPagamento = (forma: string, valorTotal: number) => {
         if (!forma) return;
         const f = forma.toLowerCase();
-        
         if (f === 'pix') totalPix += valorTotal;
         else if (f === 'dinheiro') totalDinheiro += valorTotal;
         else if (f === 'cartao_credito' || f === 'credito') totalCredito += valorTotal;
@@ -100,7 +205,6 @@ export default function RelatoriosPage() {
       };
 
       const historicoMap = new Map<string, { data: string; pdv: number; os: number; total: number }>();
-      
       const difMeses = (dataFim.getTime() - dataInicio.getTime()) / (1000 * 60 * 60 * 24 * 30);
       const agruparPorMes = periodo === "ano" || difMeses > 3;
 
@@ -116,10 +220,8 @@ export default function RelatoriosPage() {
         else iterador.setDate(iterador.getDate() + 1);
       }
 
-      vendas?.forEach(v => {
+      vendas?.forEach((v: any) => {
         if (v.forma_pagamento === 'crediario') return;
-        
-        // ADICIONADO: Separação de Gravação x Venda normal
         if (v.observacoes === "Gravação de Copos") {
           totalGravacoes += Number(v.valor_total);
           qtdGravacoes++;
@@ -127,7 +229,6 @@ export default function RelatoriosPage() {
           totalVendas += Number(v.valor_total);
           qtdVendas++;
         }
-
         processarPagamento(v.forma_pagamento, Number(v.valor_total));
         const chave = formatador.format(new Date(v.created_at));
         if (historicoMap.has(chave)) {
@@ -159,29 +260,26 @@ export default function RelatoriosPage() {
         }
       });
 
-      // ADICIONADO totalGravacoes ao faturamento e transações
       const faturamentoTotal = totalVendas + totalGravacoes + totalOrdens + totalCrediarioRecebido;
-      const qtdTransacoes = qtdVendas + qtdGravacoes + qtdOrdens + qtdParcelas;
-      const ticketMedio = qtdTransacoes > 0 ? faturamentoTotal / qtdTransacoes : 0;
+      const ticketMedio = (qtdVendas + qtdGravacoes + qtdOrdens + qtdParcelas) > 0 ? faturamentoTotal / (qtdVendas + qtdGravacoes + qtdOrdens + qtdParcelas) : 0;
 
       return {
         kpis: {
-          faturamentoTotal, ticketMedio, totalVendas, totalOrdens, totalCrediarioRecebido, totalGravacoes,
-          qtdVendas, qtdOrdens, qtdParcelas, qtdGravacoes
+          faturamentoTotal, ticketMedio, totalVendas, totalOrdens, totalCrediarioRecebido, totalGravacoes, totalSangrias,
+          qtdVendas, qtdOrdens, qtdParcelas, qtdGravacoes, qtdSangrias
         },
         pagamentos: {
-          pix: totalPix,
-          dinheiro: totalDinheiro,
-          credito: totalCredito,
-          debito: totalDebito
+          pix: totalPix, dinheiro: totalDinheiro, credito: totalCredito, debito: totalDebito
         },
         graficoEvolucao: Array.from(historicoMap.values()),
         graficoDistribuicao: [
-          { name: "Vendas (À Vista)", value: totalVendas, color: "hsl(var(--chart-1))" },
-          { name: "OS (À Vista)", value: totalOrdens, color: "hsl(var(--chart-2))" },
-          { name: "Crediário Recebido", value: totalCrediarioRecebido, color: "#f97316" },
-          { name: "Gravação", value: totalGravacoes, color: "#ec4899" }, // ADICIONADO NO GRÁFICO
-        ]
+          { name: "Vendas", value: totalVendas, color: "hsl(var(--chart-1))" },
+          { name: "OS", value: totalOrdens, color: "hsl(var(--chart-2))" },
+          { name: "Crediário", value: totalCrediarioRecebido, color: "#f97316" },
+          { name: "Gravação", value: totalGravacoes, color: "#ec4899" },
+        ],
+        listaVendas: historicoGeral,
+        listaItens: itensMapeados
       };
     }
   });
@@ -191,267 +289,420 @@ export default function RelatoriosPage() {
   }
 
  const { 
-    kpis = { faturamentoTotal: 0, ticketMedio: 0, totalVendas: 0, totalOrdens: 0, totalCrediarioRecebido: 0, totalGravacoes: 0, qtdVendas: 0, qtdOrdens: 0, qtdParcelas: 0, qtdGravacoes: 0 }, 
+    kpis = { faturamentoTotal: 0, ticketMedio: 0, totalVendas: 0, totalOrdens: 0, totalCrediarioRecebido: 0, totalGravacoes: 0, totalSangrias: 0, qtdVendas: 0, qtdOrdens: 0, qtdParcelas: 0, qtdGravacoes: 0, qtdSangrias: 0 }, 
     pagamentos = { pix: 0, dinheiro: 0, credito: 0, debito: 0 },
     graficoEvolucao = [], 
-    graficoDistribuicao = [] 
+    graficoDistribuicao = [],
+    listaVendas = [],
+    listaItens = []
   } = data || {};
 
+  const periodoTexto = periodo === 'custom' 
+    ? `${new Date(dataInicioCustom).toLocaleDateString('pt-BR')} até ${new Date(dataFimCustom).toLocaleDateString('pt-BR')}` 
+    : periodo === 'ano' ? 'Últimos 12 meses' : periodo === '7d' ? 'Últimos 7 dias' : 'Últimos 30 dias';
+
   return (
-    <div className="flex flex-col gap-6 pb-8 animate-in fade-in duration-500">
-      {/* Header Premium com Filtros de Data */}
-      <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-4 bg-card p-6 rounded-3xl border border-border/50 shadow-sm">
-        <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-foreground flex items-center gap-3">
-            <div className="bg-primary/10 p-2.5 rounded-xl">
-              <BarChart3 className="h-7 w-7 text-primary" />
-            </div>
-            Inteligência Financeira
-          </h1>
-          <p className="text-muted-foreground mt-1 ml-1 font-medium">Acompanhe o faturamento real e a divisão dos seus recebimentos.</p>
-        </div>
+    <>
+      <style>{`
+        @media print {
+          body, html, #root, main, div[class*="overflow-"] {
+            height: auto !important;
+            min-height: auto !important;
+            overflow: visible !important;
+            position: static !important;
+          }
+          .print-hide {
+            display: none !important;
+          }
+        }
+      `}</style>
+
+      <div className={`flex flex-col gap-6 pb-8 animate-in fade-in duration-500 print-hide ${printMode ? 'hidden' : 'block'}`}>
         
-        <div className="flex flex-col sm:flex-row items-end gap-3">
-          {periodo === "custom" && (
-            <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-4">
-              <div className="grid gap-1.5">
-                <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1">Data Inicial</Label>
-                <Input 
-                  type="date" 
-                  value={dataInicioCustom}
-                  onChange={(e) => setDataInicioCustom(e.target.value)}
-                  className="h-12 rounded-xl bg-background border-border/60 shadow-sm font-medium"
-                />
+        <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-4 bg-card p-6 rounded-3xl border border-border/50 shadow-sm">
+          <div>
+            <h1 className="text-3xl font-extrabold tracking-tight text-foreground flex items-center gap-3">
+              <div className="bg-primary/10 p-2.5 rounded-xl">
+                <BarChart3 className="h-7 w-7 text-primary" />
               </div>
-              <div className="grid gap-1.5">
-                <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1">Data Final</Label>
-                <Input 
-                  type="date" 
-                  value={dataFimCustom}
-                  onChange={(e) => setDataFimCustom(e.target.value)}
-                  className="h-12 rounded-xl bg-background border-border/60 shadow-sm font-medium"
-                />
+              Inteligência Financeira
+            </h1>
+            <p className="text-muted-foreground mt-1 ml-1 font-medium">Acompanhe o faturamento real e a divisão dos seus recebimentos.</p>
+          </div>
+          
+          <div className="flex flex-col sm:flex-row items-end gap-3">
+            <div className="flex items-center gap-2 mr-2 mb-1 sm:mb-0">
+              <Button onClick={() => handlePrint('vendas')} variant="outline" className="h-12 rounded-xl font-bold border-primary/20 hover:bg-primary/10 text-primary">
+                <Printer className="w-4 h-4 mr-2" /> Vendas
+              </Button>
+              <Button onClick={() => handlePrint('produtos')} variant="outline" className="h-12 rounded-xl font-bold border-emerald-500/20 hover:bg-emerald-500/10 text-emerald-500">
+                <Printer className="w-4 h-4 mr-2" /> Produtos
+              </Button>
+            </div>
+
+            {periodo === "custom" && (
+              <div className="flex items-center gap-2">
+                <div className="grid gap-1.5">
+                  <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1">Data Inicial</Label>
+                  <Input 
+                    type="date" 
+                    value={dataInicioCustom}
+                    onChange={(e) => setDataInicioCustom(e.target.value)}
+                    className="h-12 rounded-xl bg-background border-border/60 shadow-sm font-medium"
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1">Data Final</Label>
+                  <Input 
+                    type="date" 
+                    value={dataFimCustom}
+                    onChange={(e) => setDataFimCustom(e.target.value)}
+                    className="h-12 rounded-xl bg-background border-border/60 shadow-sm font-medium"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="w-full sm:w-48">
+              <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1 mb-1.5 block">Período de Análise</Label>
+              <Select value={periodo} onValueChange={(v) => setPeriodo(v as Periodo)}>
+                <SelectTrigger className="h-12 rounded-xl bg-background border-border/60 shadow-sm font-bold text-sm">
+                  <Calendar className="h-4 w-4 mr-2 text-primary" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl border-border/50">
+                  <SelectItem value="7d" className="font-medium">Últimos 7 dias</SelectItem>
+                  <SelectItem value="30d" className="font-medium">Últimos 30 dias</SelectItem>
+                  <SelectItem value="ano" className="font-medium">Últimos 12 meses</SelectItem>
+                  <SelectItem value="custom" className="font-bold text-primary">Personalizado...</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <div className="flex justify-center items-center h-64">
+            <Loader2 className="h-10 w-10 animate-spin text-primary/60" />
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 lg:grid-cols-3 gap-4">
+              <Card className="rounded-3xl border-none shadow-md bg-gradient-to-br from-primary to-primary/80 text-primary-foreground">
+                <CardContent className="p-6">
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-2">
+                      <p className="text-primary-foreground/80 font-bold text-xs uppercase tracking-wider">Receita Líquida Real</p>
+                      <p className="text-3xl font-black tracking-tight font-mono">R$ {Number(kpis.faturamentoTotal || 0).toFixed(2)}</p>
+                    </div>
+                    <div className="bg-primary-foreground/20 p-2.5 rounded-2xl"><DollarSign className="h-6 w-6" /></div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-border/40 shadow-sm hover:shadow-md transition-shadow bg-card/80 backdrop-blur-sm">
+                <CardContent className="p-6">
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-2">
+                      <p className="text-muted-foreground font-bold text-xs uppercase tracking-wider">Ticket Médio</p>
+                      <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {Number(kpis.ticketMedio || 0).toFixed(2)}</p>
+                    </div>
+                    <div className="bg-primary/10 p-2.5 rounded-2xl"><TrendingUp className="h-6 w-6 text-primary" /></div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-border/40 shadow-sm hover:shadow-md transition-shadow bg-card/80 backdrop-blur-sm">
+                <CardContent className="p-6">
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-2">
+                      <p className="text-muted-foreground font-bold text-[11px] uppercase tracking-wider">OS (À Vista)</p>
+                      <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {Number(kpis.totalOrdens || 0).toFixed(2)}</p>
+                      <p className="text-[10px] font-bold uppercase text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-md w-fit">{kpis.qtdOrdens || 0} ordens</p>
+                    </div>
+                    <div className="bg-amber-500/10 p-2.5 rounded-2xl"><Wrench className="h-6 w-6 text-amber-500" /></div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-border/40 shadow-sm hover:shadow-md transition-shadow bg-card/80 backdrop-blur-sm">
+                <CardContent className="p-6">
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-2">
+                      <p className="text-muted-foreground font-bold text-[11px] uppercase tracking-wider">Vendas (À Vista)</p>
+                      <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {Number(kpis.totalVendas || 0).toFixed(2)}</p>
+                      <p className="text-[10px] font-bold uppercase text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-md w-fit">{kpis.qtdVendas || 0} vendas</p>
+                    </div>
+                    <div className="bg-emerald-500/10 p-2.5 rounded-2xl"><ShoppingCart className="h-6 w-6 text-emerald-500" /></div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-border/40 shadow-sm hover:shadow-md transition-shadow bg-card/80 backdrop-blur-sm">
+                <CardContent className="p-6">
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-2">
+                      <p className="text-muted-foreground font-bold text-[11px] uppercase tracking-wider">Fiado Recebido</p>
+                      <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {Number(kpis.totalCrediarioRecebido || 0).toFixed(2)}</p>
+                      <p className="text-[10px] font-bold uppercase text-orange-500 bg-orange-500/10 px-2 py-0.5 rounded-md w-fit">{kpis.qtdParcelas || 0} parcelas</p>
+                    </div>
+                    <div className="bg-orange-500/10 p-2.5 rounded-2xl"><BookOpenCheck className="h-6 w-6 text-orange-500" /></div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-red-500/20 shadow-sm hover:shadow-md transition-shadow bg-red-500/5 backdrop-blur-sm">
+                <CardContent className="p-6">
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-2">
+                      <p className="text-red-500 font-bold text-[11px] uppercase tracking-wider">Sangrias / Saídas</p>
+                      <p className="text-2xl font-black tracking-tight text-red-500 font-mono">R$ {Number(kpis.totalSangrias || 0).toFixed(2)}</p>
+                      <p className="text-[10px] font-bold uppercase text-red-500 bg-red-500/10 px-2 py-0.5 rounded-md w-fit">{kpis.qtdSangrias || 0} retiradas</p>
+                    </div>
+                    <div className="bg-red-500/10 p-2.5 rounded-2xl"><ArrowDownCircle className="h-6 w-6 text-red-500" /></div>
+                  </div>
+                </CardContent>
+              </Card>
+
+            </div>
+
+            <div>
+              <h2 className="text-lg font-black tracking-tight text-foreground mb-3 ml-2 flex items-center gap-2">
+                Detalhamento de Recebimentos
+              </h2>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <Card className="rounded-3xl border-teal-500/20 shadow-sm bg-gradient-to-br from-card to-teal-500/5 hover:border-teal-500/40 transition-colors">
+                  <CardContent className="p-5">
+                    <div className="flex justify-between items-center mb-1">
+                      <p className="text-teal-600 font-bold text-[10px] uppercase tracking-widest">PIX</p>
+                      <div className="bg-teal-500/10 p-2 rounded-xl"><Smartphone className="h-4 w-4 text-teal-600" /></div>
+                    </div>
+                    <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {Number(pagamentos.pix || 0).toFixed(2)}</p>
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-3xl border-emerald-500/20 shadow-sm bg-gradient-to-br from-card to-emerald-500/5 hover:border-emerald-500/40 transition-colors">
+                  <CardContent className="p-5">
+                    <div className="flex justify-between items-center mb-1">
+                      <p className="text-emerald-600 font-bold text-[10px] uppercase tracking-widest">Dinheiro</p>
+                      <div className="bg-emerald-500/10 p-2 rounded-xl"><Banknote className="h-4 w-4 text-emerald-600" /></div>
+                    </div>
+                    <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {Number(pagamentos.dinheiro || 0).toFixed(2)}</p>
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-3xl border-indigo-500/20 shadow-sm bg-gradient-to-br from-card to-indigo-500/5 hover:border-indigo-500/40 transition-colors">
+                  <CardContent className="p-5">
+                    <div className="flex justify-between items-center mb-1">
+                      <p className="text-indigo-600 font-bold text-[10px] uppercase tracking-widest">Crédito</p>
+                      <div className="bg-indigo-500/10 p-2 rounded-xl"><CreditCard className="h-4 w-4 text-indigo-600" /></div>
+                    </div>
+                    <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {Number(pagamentos.credito || 0).toFixed(2)}</p>
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-3xl border-orange-500/20 shadow-sm bg-gradient-to-br from-card to-orange-500/5 hover:border-orange-500/40 transition-colors">
+                  <CardContent className="p-5">
+                    <div className="flex justify-between items-center mb-1">
+                      <p className="text-orange-600 font-bold text-[10px] uppercase tracking-widest">Débito</p>
+                      <div className="bg-orange-500/10 p-2 rounded-xl"><CreditCard className="h-4 w-4 text-orange-600" /></div>
+                    </div>
+                    <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {Number(pagamentos.debito || 0).toFixed(2)}</p>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <Card className="lg:col-span-2 rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm">
+                <CardHeader className="border-b border-border/30 pb-4 px-6 pt-6">
+                  <CardTitle className="text-lg font-black">Evolução de Entradas (Caixa)</CardTitle>
+                </CardHeader>
+                <CardContent className="p-6 pt-6">
+                  <div className="h-[300px] min-h-[300px] w-full">
+                    {!printMode && (
+                      <ResponsiveContainer width="100%" height="100%" minWidth={10} minHeight={300}>
+                        <AreaChart data={graficoEvolucao} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.4}/>
+                              <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.5} />
+                          <XAxis dataKey="data" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))', fontWeight: 600 }} dy={10} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))', fontWeight: 600 }} tickFormatter={(value) => `R$${value}`} />
+                          <RechartsTooltip 
+                            contentStyle={{ borderRadius: '16px', border: '1px solid hsl(var(--border))', backgroundColor: 'hsl(var(--card))' }}
+                            formatter={(value: number) => [`R$ ${value.toFixed(2)}`, "Entrada R$"]}
+                          />
+                          <Area type="monotone" dataKey="total" stroke="hsl(var(--primary))" strokeWidth={4} fillOpacity={1} fill="url(#colorTotal)" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm flex flex-col">
+                <CardHeader className="border-b border-border/30 pb-4 px-6 pt-6">
+                  <CardTitle className="text-lg font-black">Origem das Receitas</CardTitle>
+                </CardHeader>
+                <CardContent className="p-6 flex-1 flex flex-col justify-center items-center">
+                  {kpis.faturamentoTotal === 0 ? (
+                    <div className="text-center text-muted-foreground space-y-2">
+                      <BarChart3 className="h-12 w-12 mx-auto opacity-20" />
+                      <p className="font-bold">Sem faturamento no período</p>
+                    </div>
+                  ) : (
+                    <div className="h-[250px] min-h-[250px] w-full">
+                      {!printMode && (
+                        <ResponsiveContainer width="100%" height="100%" minWidth={10} minHeight={250}>
+                          <PieChart>
+                            <Pie data={graficoDistribuicao.filter(d => d.value > 0)} cx="50%" cy="50%" innerRadius={65} outerRadius={95} paddingAngle={5} dataKey="value" stroke="none" cornerRadius={8}>
+                              {graficoDistribuicao.filter(d => d.value > 0).map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <RechartsTooltip formatter={(value: number) => [`R$ ${value.toFixed(2)}`, "Valor"]} contentStyle={{ borderRadius: '12px', border: 'none' }} />
+                            <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 600 }} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ==========================================
+          LAYOUT EXCLUSIVO PARA IMPRESSÃO (TELA CLARA)
+          ========================================== */}
+      {printMode && (
+        <div className="bg-white text-black p-4 font-sans w-full absolute top-0 left-0 z-50">
+          <div className="mb-8 border-b-2 border-gray-800 pb-4">
+            <h1 className="text-2xl font-black uppercase tracking-widest text-black">
+              {printMode === 'vendas' ? 'Relatório de Vendas e Recebimentos' : 'Relatório de Produtos Vendidos'}
+            </h1>
+            <p className="text-gray-600 font-medium mt-1">Período: {periodoTexto}</p>
+          </div>
+
+          {printMode === 'vendas' && (
+            <div className="space-y-8">
+              <div className="grid grid-cols-6 gap-4 border border-gray-300 p-4 rounded-lg bg-gray-50">
+                <div>
+                  <h3 className="font-bold text-gray-500 uppercase text-[10px]">Faturamento Total</h3>
+                  <p className="text-lg font-black text-emerald-700">R$ {Number(kpis.faturamentoTotal || 0).toFixed(2)}</p>
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-500 uppercase text-[10px]">Sangrias / Saídas</h3>
+                  <p className="text-base font-bold text-red-600">R$ {Number(kpis.totalSangrias || 0).toFixed(2)}</p>
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-500 uppercase text-[10px]">Vendas (À Vista)</h3>
+                  <p className="text-base font-bold text-black">R$ {Number(kpis.totalVendas || 0).toFixed(2)}</p>
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-500 uppercase text-[10px]">OS (À Vista)</h3>
+                  <p className="text-base font-bold text-black">R$ {Number(kpis.totalOrdens || 0).toFixed(2)}</p>
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-500 uppercase text-[10px]">Crediário Recebido</h3>
+                  <p className="text-base font-bold text-black">R$ {Number(kpis.totalCrediarioRecebido || 0).toFixed(2)}</p>
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-500 uppercase text-[10px]">Gravação de Copos</h3>
+                  <p className="text-base font-bold text-black">R$ {Number(kpis.totalGravacoes || 0).toFixed(2)}</p>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-base font-black mb-2 border-b border-gray-300 pb-1">Formas de Pagamento (Entradas)</h3>
+                <div className="grid grid-cols-4 gap-4">
+                  <div className="bg-gray-100 p-3 rounded-lg border border-gray-200 text-center">
+                    <p className="text-[11px] font-bold text-gray-500 uppercase">PIX</p>
+                    <p className="font-black text-base text-black">R$ {Number(pagamentos.pix || 0).toFixed(2)}</p>
+                  </div>
+                  <div className="bg-gray-100 p-3 rounded-lg border border-gray-200 text-center">
+                    <p className="text-[11px] font-bold text-gray-500 uppercase">Dinheiro</p>
+                    <p className="font-black text-base text-black">R$ {Number(pagamentos.dinheiro || 0).toFixed(2)}</p>
+                  </div>
+                  <div className="bg-gray-100 p-3 rounded-lg border border-gray-200 text-center">
+                    <p className="text-[11px] font-bold text-gray-500 uppercase">Cartão Crédito</p>
+                    <p className="font-black text-base text-black">R$ {Number(pagamentos.credito || 0).toFixed(2)}</p>
+                  </div>
+                  <div className="bg-gray-100 p-3 rounded-lg border border-gray-200 text-center">
+                    <p className="text-[11px] font-bold text-gray-500 uppercase">Cartão Débito</p>
+                    <p className="font-black text-base text-black">R$ {Number(pagamentos.debito || 0).toFixed(2)}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <h3 className="text-base font-black mb-2 border-b border-gray-300 pb-1">Histórico Detalhado de Vendas e Sangrias</h3>
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-gray-200 text-gray-800">
+                      <th className="p-2 border border-gray-300">Data / Hora</th>
+                      <th className="p-2 border border-gray-300">Forma de Pagamento</th>
+                      <th className="p-2 border border-gray-300">Observações</th>
+                      <th className="p-2 border border-gray-300 text-right">Valor Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {listaVendas.length > 0 ? listaVendas.map((venda: any) => (
+                      <tr key={`print-v-${venda.id}`} className="border-b border-gray-200">
+                        <td className="p-2 border-l border-r border-gray-300">{new Date(venda.created_at).toLocaleString('pt-BR')}</td>
+                        <td className="p-2 border-r border-gray-300 capitalize">
+                          {venda.tipo === 'sangria' ? <span style={{ color: 'red', fontWeight: 'bold' }}>Sangria</span> : (venda.forma_pagamento ? venda.forma_pagamento.replace('_', ' ') : '-')}
+                        </td>
+                        <td className="p-2 border-r border-gray-300">{venda.observacoes || '-'}</td>
+                        <td className="p-2 border-r border-gray-300 text-right font-bold" style={{ color: venda.tipo === 'sangria' ? 'red' : 'inherit' }}>
+                          {venda.tipo === 'sangria' ? '- ' : ''}R$ {Number(venda.valor_total || 0).toFixed(2)}
+                        </td>
+                      </tr>
+                    )) : (
+                      <tr><td colSpan={4} className="p-4 text-center border border-gray-300">Nenhum registo encontrado no período.</td></tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
 
-          <div className="w-full sm:w-56">
-            <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1 mb-1.5 block">Período de Análise</Label>
-            <Select value={periodo} onValueChange={(v) => setPeriodo(v as Periodo)}>
-              <SelectTrigger className="h-12 rounded-xl bg-background border-border/60 shadow-sm font-bold text-sm">
-                <Calendar className="h-4 w-4 mr-2 text-primary" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="rounded-xl border-border/50">
-                <SelectItem value="7d" className="font-medium">Últimos 7 dias</SelectItem>
-                <SelectItem value="30d" className="font-medium">Últimos 30 dias</SelectItem>
-                <SelectItem value="ano" className="font-medium">Últimos 12 meses</SelectItem>
-                <SelectItem value="custom" className="font-bold text-primary">Personalizado...</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </div>
-
-      {isLoading ? (
-        <div className="flex justify-center items-center h-64">
-          <Loader2 className="h-10 w-10 animate-spin text-primary/60" />
-        </div>
-      ) : (
-        <>
-          {/* Linha 1: KPIs Principais COM PROTEÇÃO Number(x || 0) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 lg:grid-cols-3 gap-4">
-            <Card className="rounded-3xl border-none shadow-md bg-gradient-to-br from-primary to-primary/80 text-primary-foreground">
-              <CardContent className="p-6">
-                <div className="flex justify-between items-start">
-                  <div className="space-y-2">
-                    <p className="text-primary-foreground/80 font-bold text-xs uppercase tracking-wider">Receita Líquida Real</p>
-                    <p className="text-3xl font-black tracking-tight font-mono">R$ {Number(kpis.faturamentoTotal || 0).toFixed(2)}</p>
-                  </div>
-                  <div className="bg-primary-foreground/20 p-2.5 rounded-2xl"><DollarSign className="h-6 w-6" /></div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-3xl border-border/40 shadow-sm hover:shadow-md transition-shadow bg-card/80 backdrop-blur-sm">
-              <CardContent className="p-6">
-                <div className="flex justify-between items-start">
-                  <div className="space-y-2">
-                    <p className="text-muted-foreground font-bold text-xs uppercase tracking-wider">Ticket Médio</p>
-                    <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {Number(kpis.ticketMedio || 0).toFixed(2)}</p>
-                  </div>
-                  <div className="bg-primary/10 p-2.5 rounded-2xl"><TrendingUp className="h-6 w-6 text-primary" /></div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-3xl border-border/40 shadow-sm hover:shadow-md transition-shadow bg-card/80 backdrop-blur-sm">
-              <CardContent className="p-6">
-                <div className="flex justify-between items-start">
-                  <div className="space-y-2">
-                    <p className="text-muted-foreground font-bold text-[11px] uppercase tracking-wider">OS (À Vista)</p>
-                    <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {Number(kpis.totalOrdens || 0).toFixed(2)}</p>
-                    <p className="text-[10px] font-bold uppercase text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-md w-fit">{kpis.qtdOrdens || 0} ordens</p>
-                  </div>
-                  <div className="bg-amber-500/10 p-2.5 rounded-2xl"><Wrench className="h-6 w-6 text-amber-500" /></div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-3xl border-border/40 shadow-sm hover:shadow-md transition-shadow bg-card/80 backdrop-blur-sm">
-              <CardContent className="p-6">
-                <div className="flex justify-between items-start">
-                  <div className="space-y-2">
-                    <p className="text-muted-foreground font-bold text-[11px] uppercase tracking-wider">Vendas (À Vista)</p>
-                    <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {Number(kpis.totalVendas || 0).toFixed(2)}</p>
-                    <p className="text-[10px] font-bold uppercase text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-md w-fit">{kpis.qtdVendas || 0} vendas</p>
-                  </div>
-                  <div className="bg-emerald-500/10 p-2.5 rounded-2xl"><ShoppingCart className="h-6 w-6 text-emerald-500" /></div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-3xl border-border/40 shadow-sm hover:shadow-md transition-shadow bg-card/80 backdrop-blur-sm">
-              <CardContent className="p-6">
-                <div className="flex justify-between items-start">
-                  <div className="space-y-2">
-                    <p className="text-muted-foreground font-bold text-[11px] uppercase tracking-wider">Fiado Recebido</p>
-                    <p className="text-2xl font-black tracking-tight text-foreground font-mono">R$ {Number(kpis.totalCrediarioRecebido || 0).toFixed(2)}</p>
-                    <p className="text-[10px] font-bold uppercase text-orange-500 bg-orange-500/10 px-2 py-0.5 rounded-md w-fit">{kpis.qtdParcelas || 0} parcelas</p>
-                  </div>
-                  <div className="bg-orange-500/10 p-2.5 rounded-2xl"><BookOpenCheck className="h-6 w-6 text-orange-500" /></div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* NOVA LINHA: Detalhamento por Forma de Pagamento */}
-          <div>
-            <h2 className="text-lg font-black tracking-tight text-foreground mb-3 ml-2 flex items-center gap-2">
-              Detalhamento de Recebimentos
-            </h2>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              
-              <Card className="rounded-3xl border-teal-500/20 shadow-sm bg-gradient-to-br from-card to-teal-500/5 hover:border-teal-500/40 transition-colors">
-                <CardContent className="p-5">
-                  <div className="flex justify-between items-center mb-1">
-                    <p className="text-teal-600 font-bold text-[10px] uppercase tracking-widest">PIX</p>
-                    <div className="bg-teal-500/10 p-2 rounded-xl"><Smartphone className="h-4 w-4 text-teal-600" /></div>
-                  </div>
-                  <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {Number(pagamentos.pix || 0).toFixed(2)}</p>
-                </CardContent>
-              </Card>
-
-              <Card className="rounded-3xl border-emerald-500/20 shadow-sm bg-gradient-to-br from-card to-emerald-500/5 hover:border-emerald-500/40 transition-colors">
-                <CardContent className="p-5">
-                  <div className="flex justify-between items-center mb-1">
-                    <p className="text-emerald-600 font-bold text-[10px] uppercase tracking-widest">Dinheiro</p>
-                    <div className="bg-emerald-500/10 p-2 rounded-xl"><Banknote className="h-4 w-4 text-emerald-600" /></div>
-                  </div>
-                  <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {Number(pagamentos.dinheiro || 0).toFixed(2)}</p>
-                </CardContent>
-              </Card>
-
-              <Card className="rounded-3xl border-indigo-500/20 shadow-sm bg-gradient-to-br from-card to-indigo-500/5 hover:border-indigo-500/40 transition-colors">
-                <CardContent className="p-5">
-                  <div className="flex justify-between items-center mb-1">
-                    <p className="text-indigo-600 font-bold text-[10px] uppercase tracking-widest">Crédito</p>
-                    <div className="bg-indigo-500/10 p-2 rounded-xl"><CreditCard className="h-4 w-4 text-indigo-600" /></div>
-                  </div>
-                  <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {Number(pagamentos.credito || 0).toFixed(2)}</p>
-                </CardContent>
-              </Card>
-
-              <Card className="rounded-3xl border-orange-500/20 shadow-sm bg-gradient-to-br from-card to-orange-500/5 hover:border-orange-500/40 transition-colors">
-                <CardContent className="p-5">
-                  <div className="flex justify-between items-center mb-1">
-                    <p className="text-orange-600 font-bold text-[10px] uppercase tracking-widest">Débito</p>
-                    <div className="bg-orange-500/10 p-2 rounded-xl"><CreditCard className="h-4 w-4 text-orange-600" /></div>
-                  </div>
-                  <p className="text-xl font-black tracking-tight text-foreground font-mono">R$ {Number(pagamentos.debito || 0).toFixed(2)}</p>
-                </CardContent>
-              </Card>
-
-            </div>
-          </div>
-
-          {/* Linha 3: Gráficos Detalhados */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            <Card className="lg:col-span-2 rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm">
-              <CardHeader className="border-b border-border/30 pb-4 px-6 pt-6">
-                <CardTitle className="text-lg font-black">Evolução de Entradas (Caixa)</CardTitle>
-              </CardHeader>
-              <CardContent className="p-6 pt-6">
-                <div className="h-[300px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={graficoEvolucao} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.4}/>
-                          <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.5} />
-                      <XAxis dataKey="data" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))', fontWeight: 600 }} dy={10} />
-                      <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))', fontWeight: 600 }} tickFormatter={(value) => `R$${value}`} />
-                      <Tooltip 
-                        contentStyle={{ borderRadius: '16px', border: '1px solid hsl(var(--border))', boxShadow: '0 10px 40px -10px rgba(0,0,0,0.1)', backgroundColor: 'hsl(var(--card))' }}
-                        formatter={(value: number) => [`R$ ${value.toFixed(2)}`, "Entrada R$"]}
-                        labelStyle={{ fontWeight: '900', color: 'hsl(var(--foreground))', marginBottom: '4px' }}
-                      />
-                      <Area type="monotone" dataKey="total" stroke="hsl(var(--primary))" strokeWidth={4} fillOpacity={1} fill="url(#colorTotal)" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-3xl border-border/40 shadow-sm bg-card/80 backdrop-blur-sm flex flex-col">
-              <CardHeader className="border-b border-border/30 pb-4 px-6 pt-6">
-                <CardTitle className="text-lg font-black">Origem das Receitas</CardTitle>
-              </CardHeader>
-              <CardContent className="p-6 flex-1 flex flex-col justify-center items-center">
-                {kpis.faturamentoTotal === 0 ? (
-                  <div className="text-center text-muted-foreground space-y-2">
-                    <BarChart3 className="h-12 w-12 mx-auto opacity-20" />
-                    <p className="font-bold">Sem faturamento no período</p>
-                    <p className="text-xs font-medium opacity-70">Nenhuma receita à vista recebida.</p>
-                  </div>
-                ) : (
-                  <div className="h-[250px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={graficoDistribuicao.filter(d => d.value > 0)}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={65}
-                          outerRadius={95}
-                          paddingAngle={5}
-                          dataKey="value"
-                          stroke="none"
-                          cornerRadius={8}
-                        >
-                          {graficoDistribuicao.filter(d => d.value > 0).map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
-                          ))}
-                        </Pie>
-                        <Tooltip 
-                          formatter={(value: number) => [`R$ ${value.toFixed(2)}`, "Valor"]}
-                          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 40px -10px rgba(0,0,0,0.1)', fontWeight: 'bold' }}
-                        />
-                        <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 600 }} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
+          {printMode === 'produtos' && (
+            <table className="w-full text-left border-collapse text-xs mt-6">
+              <thead>
+                <tr className="bg-gray-200 text-gray-800">
+                  <th className="p-2 border border-gray-300">Data da Venda</th>
+                  <th className="p-2 border border-gray-300">Cód. Barras</th>
+                  <th className="p-2 border border-gray-300">Produto</th>
+                  <th className="p-2 border border-gray-300 text-center">Quantidade</th>
+                  <th className="p-2 border border-gray-300 text-right">Desconto</th>
+                  <th className="p-2 border border-gray-300 text-right">Valor Produto</th>
+                </tr>
+              </thead>
+              <tbody>
+                {listaItens.length > 0 ? listaItens.map((item: any) => (
+                  <tr key={`print-i-${item.id}`} className="border-b border-gray-200">
+                    <td className="p-2 border-l border-r border-gray-300 whitespace-nowrap">{item.data ? new Date(item.data).toLocaleDateString('pt-BR') : '-'}</td>
+                    <td className="p-2 border-r border-gray-300 text-gray-600 font-mono">{item.codigo_barras}</td>
+                    <td className="p-2 border-r border-gray-300 font-bold">{item.produto}</td>
+                    <td className="p-2 border-r border-gray-300 text-center">{item.quantidade}</td>
+                    <td className="p-2 border-r border-gray-300 text-right text-gray-500">R$ {Number(item.desconto || 0).toFixed(2)}</td>
+                    <td className="p-2 border-r border-gray-300 text-right font-black">R$ {Number(item.valor || 0).toFixed(2)}</td>
+                  </tr>
+                )) : (
+                  <tr><td colSpan={6} className="p-4 text-center border border-gray-300">Nenhum produto vendido encontrado no período.</td></tr>
                 )}
-              </CardContent>
-            </Card>
-
-          </div>
-        </>
+              </tbody>
+            </table>
+          )}
+        </div>
       )}
-    </div>
+    </>
   );
 }

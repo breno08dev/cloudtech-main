@@ -46,6 +46,10 @@ export default function OrdemDetailPage() {
   const [parcelasCrediario, setParcelasCrediario] = useState<number>(1);
   const [dataVencimentoCrediario, setDataVencimentoCrediario] = useState<string>("");
 
+  // ADICIONADO: Estados para edição do desconto
+  const [isEditingDiscount, setIsEditingDiscount] = useState(false);
+  const [discountValue, setDiscountValue] = useState(0);
+
   useEffect(() => {
     const defaultDate = new Date();
     defaultDate.setDate(defaultDate.getDate() + 30);
@@ -109,6 +113,9 @@ export default function OrdemDetailPage() {
         garantia_servico: data.ordem.garantia_servico || config?.garantia_padrao || "90 dias",
         peca_original: data.ordem.peca_original !== undefined ? data.ordem.peca_original : false,
       });
+      
+      // Sincroniza o valor de desconto que vem do banco
+      setDiscountValue(data.ordem.desconto || 0);
     }
   }, [data?.ordem, config]);
 
@@ -144,6 +151,26 @@ export default function OrdemDetailPage() {
       valor_servico: valorServico, 
       valor_total: Math.max(0, valorTotalSemDesconto - descontoAplicado)
     }).eq("id", osId);
+  };
+
+  const handleSaveDiscount = async () => {
+    try {
+      const valorPecas = data?.ordem?.valor_pecas || 0;
+      const valorServico = data?.ordem?.valor_servico || 0;
+      const novoTotal = Math.max(0, (valorPecas + valorServico) - discountValue);
+      
+      const { error } = await supabase
+        .from("ordens_servico")
+        .update({ desconto: discountValue, valor_total: novoTotal })
+        .eq("id", id!);
+      
+      if (error) throw error;
+      setIsEditingDiscount(false);
+      toast.success("Desconto atualizado com sucesso!");
+      queryClient.invalidateQueries({ queryKey: ["ordem_detail", id] });
+    } catch (error: any) {
+      toast.error(`Erro ao atualizar desconto: ${error.message}`);
+    }
   };
 
   const saveOsMutation = useMutation({
@@ -759,7 +786,33 @@ export default function OrdemDetailPage() {
             <div className="space-y-4">
               <div className="flex justify-between items-center text-base"><span className="text-muted-foreground font-semibold">Mão de Obra</span><span className="font-mono font-bold bg-background px-3 py-1 rounded-lg border border-border/40 shadow-sm">R$ {(ordem.valor_servico || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>
               <div className="flex justify-between items-center text-base"><span className="text-muted-foreground font-semibold">Peças</span><span className="font-mono font-bold bg-background px-3 py-1 rounded-lg border border-border/40 shadow-sm">R$ {(ordem.valor_pecas || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>
-              {ordem.desconto > 0 && (<div className="flex justify-between items-center text-base text-red-500 font-medium"><span>Desconto</span><span className="font-mono font-bold bg-background px-3 py-1 rounded-lg border border-red-200 shadow-sm">- R$ {Number(ordem.desconto).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>)}
+              
+              <div className="flex justify-between items-center text-base text-red-500 font-medium">
+                <span>Desconto</span>
+                {isEditingDiscount ? (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={discountValue}
+                      onChange={(e) => setDiscountValue(Number(e.target.value))}
+                      className="w-24 h-8 text-sm bg-background text-foreground"
+                      placeholder="Valor"
+                    />
+                    <Button size="sm" onClick={handleSaveDiscount} className="h-8 px-2 text-xs">Salvar</Button>
+                    <Button size="sm" variant="outline" onClick={() => { setDiscountValue(ordem.desconto || 0); setIsEditingDiscount(false); }} className="h-8 px-2 text-xs">Cancelar</Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-bold bg-background px-3 py-1 rounded-lg border border-red-200 shadow-sm">
+                      - R$ {Number(ordem.desconto || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                    <Button size="sm" variant="ghost" onClick={() => setIsEditingDiscount(true)} className="h-8 text-xs hover:bg-red-500/10 hover:text-red-600">Modificar</Button>
+                  </div>
+                )}
+              </div>
+
               <div className="border-t-2 border-primary/20 pt-4 flex justify-between items-end"><span className="font-black uppercase tracking-widest text-sm text-primary mb-1">Total da OS</span><span className="text-5xl font-black text-primary font-mono tracking-tighter drop-shadow-sm">R$ {ordem.valor_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>
             </div>
             

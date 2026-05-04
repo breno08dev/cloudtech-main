@@ -12,39 +12,46 @@ export type Database = {
   }
   public: {
     Tables: {
-      clientes: {
-        Row: {
-          id: string
-          nome: string
-          telefone: string | null
-          whatsapp: string | null
-          cpf_cnpj: string | null
-          tipo_cliente: string
-          observacoes: string | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          nome: string
-          telefone?: string | null
-          whatsapp?: string | null
-          cpf_cnpj?: string | null
-          tipo_cliente?: string
-          observacoes?: string | null
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          nome?: string
-          telefone?: string | null
-          whatsapp?: string | null
-          cpf_cnpj?: string | null
-          tipo_cliente?: string
-          observacoes?: string | null
-          created_at?: string
-        }
-        Relationships: []
-      }
+     clientes: {
+  Row: {
+    id: string
+    nome: string
+    telefone: string | null
+    whatsapp: string | null
+    cpf_cnpj: string | null
+    tipo_cliente: string
+    observacoes: string | null
+    created_at: string
+    // ADICIONE A LINHA ABAIXO:
+    data_aniversario: string | null
+  }
+  Insert: {
+    id?: string
+    nome: string
+    telefone?: string | null
+    whatsapp?: string | null
+    cpf_cnpj?: string | null
+    tipo_cliente?: string
+    observacoes?: string | null
+    created_at?: string
+    // ADICIONE A LINHA ABAIXO:
+    data_aniversario?: string | null
+  }
+  Update: {
+    id?: string
+    nome?: string
+    telefone?: string | null
+    whatsapp?: string | null
+    cpf_cnpj?: string | null
+    tipo_cliente?: string
+    observacoes?: string | null
+    created_at?: string
+    // ADICIONE A LINHA ABAIXO:
+    data_aniversario?: string | null
+  }
+  Relationships: []
+}
+
       configuracoes: {
         Row: {
           id: string
@@ -576,6 +583,7 @@ export type Database = {
           desconto: number | null
           forma_pagamento: string
           created_at: string
+          observacoes: string | null
         }
         Insert: {
           id?: string
@@ -584,6 +592,7 @@ export type Database = {
           desconto?: number | null
           forma_pagamento?: string
           created_at?: string
+          observacoes: string | null
         }
         Update: {
           id?: string
@@ -592,6 +601,7 @@ export type Database = {
           desconto?: number | null
           forma_pagamento?: string
           created_at?: string
+          observacoes: string | null
         }
         Relationships: [
           {
@@ -603,6 +613,29 @@ export type Database = {
           }
         ]
       }
+
+      sangrias: {
+        Row: {
+          id: string
+          valor: number
+          observacao: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          valor: number
+          observacao?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          valor?: number
+          observacao?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+
       venda_itens: {
         Row: {
           id: string

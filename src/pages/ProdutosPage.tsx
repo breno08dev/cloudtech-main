@@ -280,7 +280,7 @@ const imprimirEtiquetas = () => {
       <style>
         @page { 
           size: A4 portrait;
-          margin: 12.1mm 4mm 9.7mm 11.3mm;
+          margin: 12.1mm 4mm 9.7mm 12.3mm;
         }
 
         body { 

@@ -146,40 +146,94 @@ export default function GravacaoPage() {
       </tr>
     `).join("");
 
-    const html = `
+const html = `
       <!DOCTYPE html>
-      <html><head>
+      <html>
+      <head>
       <meta charset="utf-8">
-      <title>Ordem de Serviço</title>
+      <title>Ordem de Serviço - Gravação</title>
       <style>
-        body { font-family: sans-serif; padding: 20px; color: #333; }
-        .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-        .title { font-size: 24px; font-weight: bold; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        .totals { text-align: right; font-size: 14px; }
-        .grand-total { font-size: 20px; font-weight: bold; color: #000; margin-top: 10px; }
-      </style></head><body>
-        <div class="header">
-          <div><div class="title">${nomeEmpresa}</div><p>Ordem de Serviço - Gravação a Laser</p></div>
-          <div style="text-align: right;"><p>Data: ${new Date().toLocaleDateString("pt-BR")}</p><p>Cliente: ${clienteNome}</p></div>
+        /* Configurações para bobina térmica 80mm */
+        @page { margin: 0; size: 80mm auto; }
+        
+        /* Força preto absoluto e tira desfoque */
+        body, p, span, div, h1, h2, h3, th, td {
+          color: #000000 !important;
+          -webkit-font-smoothing: none;
+          -moz-osx-font-smoothing: grayscale;
+        }
+
+        body { 
+          font-family: 'Courier New', Courier, monospace; 
+          font-size: 12px; 
+          margin: 0; 
+          padding: 5mm; 
+          width: 70mm; 
+        }
+        
+        h1, h2, h3, p { margin: 0; padding: 0; line-height: 1.2; }
+        .center { text-align: center; } 
+        .right { text-align: right; } 
+        .bold { font-weight: bold; }
+        .linha { border-bottom: 1px dashed #000000 !important; margin: 8px 0; }
+        
+        /* Tabela compacta estilo cupom */
+        table { width: 100%; border-collapse: collapse; margin-top: 5px; }
+        th { border-bottom: 1px dashed #000000 !important; padding-bottom: 4px; font-weight: bold; font-size: 11px; }
+        td { font-size: 11px; padding: 3px 0; border: none !important; } /* Removemos a borda sólida das linhas para ficar igual ao PDV */
+      </style>
+      </head>
+      <body>
+        <div class="center">
+          <h2 class="bold" style="font-size: 16px;">${nomeEmpresa}</h2>
+          <div class="linha"></div>
+          <h3 class="bold">GRAVACAO A LASER</h3>
+          <p>Data: ${new Date().toLocaleDateString("pt-BR")}</p>
         </div>
+        
+        <div class="linha"></div>
+        
+        <div style="margin-bottom: 8px;">
+          <p><span class="bold">Cliente:</span> ${clienteNome}</p>
+        </div>
+        
         <table>
-          <thead><tr style="background: #f5f5f5;">
-            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Qtd</th>
-            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Descrição / Produto</th>
-            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">Vlr. Unit</th>
-            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">Vlr. Gravação</th>
-            <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">Subtotal</th>
-          </tr></thead>
-          <tbody>${rows}</tbody>
+          <thead>
+            <tr>
+              <th style="text-align: left;">QTD</th>
+              <th style="text-align: left;">PRODUTO</th>
+              <th style="text-align: right;">UNIT</th>
+              <th style="text-align: right;">GRAV</th>
+              <th style="text-align: right;">TOT</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
         </table>
-        <div class="totals">
-          <p>Subtotal: R$ ${subtotal.toFixed(2)}</p>
-          ${Number(descontoValor) > 0 ? `<p>Desconto: - R$ ${Number(descontoValor).toFixed(2)}</p>` : ""}
-          <div class="grand-total">TOTAL A PAGAR: R$ ${totalGeral.toFixed(2)}</div>
-          <p style="margin-top: 10px;">Forma de Pagamento: ${getFormaPagamentoString()}</p>
+        
+        <div class="linha"></div>
+        
+        <div class="right">
+          <p class="bold" style="font-size: 14px;">SUBTOTAL: R$ ${subtotal.toFixed(2)}</p>
         </div>
-      </body></html>
+        
+        ${Number(descontoValor) > 0 ? `<div class="right"><p style="font-size: 14px;">DESCONTO: - R$ ${Number(descontoValor).toFixed(2)}</p></div>` : ""}
+        
+        <div class="right">
+          <h2 class="bold" style="font-size: 16px;">TOTAL: R$ ${totalGeral.toFixed(2)}</h2>
+        </div>
+        
+        <div class="right" style="margin-top: 6px;">
+          <p style="font-size: 12px;">Pgto: ${getFormaPagamentoString()}</p>
+        </div>
+
+        <div class="center" style="margin-top: 20px;">
+          <p class="bold">Obrigado pela preferencia!</p>
+          <p style="font-size: 10px; margin-top: 5px;">Sistema</p>
+        </div>
+      </body>
+      </html>
     `;
 
     // IMPRESSÃO INVISÍVEL (MESMO PADRÃO DO SISTEMA)
