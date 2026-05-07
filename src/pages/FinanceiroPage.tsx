@@ -41,7 +41,7 @@ export default function FinanceiroPage() {
 
   // Formulários
   const [saldoInicial, setSaldoInicial] = useState(0);
-  const [movForm, setMovForm] = useState({ tipo: "saida", categoria: "Gerais", valor: 0, descricao: "" });
+ const [movForm, setMovForm] = useState({ tipo: "sangria", categoria: "Gerais", valor: 0, descricao: "" });
   const [custoForm, setCustoForm] = useState({ descricao: "", valor: 0, tipo: "fixo", vencimento: "" });
 
   const { data: config } = useQuery({
@@ -98,30 +98,56 @@ export default function FinanceiroPage() {
     enabled: !!caixaAtual?.data_abertura,
   });
 
-  // ================= UNIFICAR O HISTÓRICO =================
-  const historicoCaixa = useMemo(() => {
+  // ================= UNIFICAR O HISTÓRICO E SEPARAR PAGAMENTOS =================
+  const { historicoCaixa, totaisPagamento } = useMemo(() => {
     const lista: any[] = [];
-    
+    const totais = { pix: 0, dinheiro: 0, credito: 0, debito: 0, outros: 0 };
+
+    const somarPagamento = (forma: string, valor: number) => {
+      if (!forma) { totais.outros += valor; return; }
+      const f = String(forma).toLowerCase();
+      if (f === 'pix') totais.pix += valor;
+      else if (f === 'dinheiro') totais.dinheiro += valor;
+      else if (f === 'cartao_credito' || f === 'credito') totais.credito += valor;
+      else if (f === 'cartao_debito' || f === 'debito') totais.debito += valor;
+      else if (f.includes('misto')) {
+        const dinMatch = forma.match(/Din R\$([0-9.]+)/);
+        if (dinMatch) totais.dinheiro += parseFloat(dinMatch[1]);
+        const pixMatch = forma.match(/PIX R\$([0-9.]+)/);
+        if (pixMatch) totais.pix += parseFloat(pixMatch[1]);
+        const credMatch = forma.match(/Créd R\$([0-9.]+)/);
+        if (credMatch) totais.credito += parseFloat(credMatch[1]);
+        const debMatch = forma.match(/Déb R\$([0-9.]+)/);
+        if (debMatch) totais.debito += parseFloat(debMatch[1]);
+      } else {
+        totais.outros += valor;
+      }
+    };
+
     // Movimentações avulsas
-    movimentacoes.forEach((m: any) => lista.push({
-      id: m.id,
-      data: m.created_at,
-      tipo: m.tipo,
-      categoria: m.categoria,
-      origem_id: m.origem_id,
-      descricaoOriginal: m.descricao,
-      descricao: m.categoria + (m.descricao ? ` - ${m.descricao}` : ''),
-      cliente: '—',
-      valor: Number(m.valor),
-      isSaida: m.tipo === 'saida' || m.tipo === 'sangria'
-    }));
+    movimentacoes.forEach((m: any) => {
+      lista.push({
+        id: m.id,
+        data: m.created_at,
+        tipo: m.tipo,
+        categoria: m.categoria,
+        origem_id: m.origem_id,
+        descricaoOriginal: m.descricao,
+        descricao: m.categoria + (m.descricao ? ` - ${m.descricao}` : ''),
+        cliente: '—',
+        valor: Number(m.valor),
+        isSaida: m.tipo === 'saida' || m.tipo === 'sangria'
+      });
+      // Entradas manuais e reforços contam como Dinheiro Físico no caixa
+      if (m.tipo === 'entrada' || m.tipo === 'reforco') {
+        totais.dinheiro += Number(m.valor);
+      }
+    });
 
     // Vendas à vista
     vendasPdv.forEach((v: any) => {
       if (v.forma_pagamento === 'crediario') return;
-
       const isGravacao = v.observacoes === "Gravação de Copos";
-
       lista.push({
         id: v.id,
         data: v.created_at,
@@ -131,6 +157,7 @@ export default function FinanceiroPage() {
         valor: Number(v.valor_total),
         isSaida: false
       });
+      somarPagamento(v.forma_pagamento, Number(v.valor_total));
     });
 
     // OS à vista
@@ -145,11 +172,15 @@ export default function FinanceiroPage() {
         valor: Number(o.valor_total),
         isSaida: false
       });
+      somarPagamento(o.forma_pagamento, Number(o.valor_total));
     });
 
-    return lista.sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime());
+    return {
+      historicoCaixa: lista.sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime()),
+      totaisPagamento: totais
+    };
   }, [movimentacoes, vendasPdv, ordensServico]);
-
+  
   const totalEntradas = historicoCaixa.filter((h: any) => !h.isSaida).reduce((acc: number, h: any) => acc + h.valor, 0);
   const totalSaidas = historicoCaixa.filter((h: any) => h.isSaida).reduce((acc: number, h: any) => acc + h.valor, 0);
   const saldoPrevisto = (caixaAtual ? Number(caixaAtual.saldo_inicial) : 0) + totalEntradas - totalSaidas;
@@ -180,7 +211,7 @@ export default function FinanceiroPage() {
       `;
     }).join("");
 
-    const htmlContent = `
+  const htmlContent = `
       <!DOCTYPE html>
       <html>
       <head>
@@ -226,6 +257,14 @@ export default function FinanceiroPage() {
         </table>
         
         <div style="clear: both;"></div>
+
+        <div class="resumo-box" style="margin-right: 15px;">
+          <h3 class="bold" style="border-bottom: 1px solid #000; padding-bottom: 5px; margin-bottom: 5px;">RECEBIMENTOS (ENTRADAS)</h3>
+          <p style="display: flex; justify-content: space-between;"><span>Dinheiro (+ Reforços):</span> <span>R$ ${totaisPagamento.dinheiro.toFixed(2)}</span></p>
+          <p style="display: flex; justify-content: space-between;"><span>PIX:</span> <span>R$ ${totaisPagamento.pix.toFixed(2)}</span></p>
+          <p style="display: flex; justify-content: space-between;"><span>Cartão de Crédito:</span> <span>R$ ${totaisPagamento.credito.toFixed(2)}</span></p>
+          <p style="display: flex; justify-content: space-between;"><span>Cartão de Débito:</span> <span>R$ ${totaisPagamento.debito.toFixed(2)}</span></p>
+        </div>
 
         <div class="resumo-box">
           <h3 class="bold" style="border-bottom: 1px solid #000; padding-bottom: 5px; margin-bottom: 5px;">RESUMO FINANCEIRO</h3>
@@ -440,10 +479,10 @@ export default function FinanceiroPage() {
         if (errSangria) console.error("Erro ao salvar sangria na tabela:", errSangria);
       }
     },
-    onSuccess: () => { 
+   onSuccess: () => { 
       toast.success("Lançamento Registado", { description: "A movimentação foi adicionada ao caixa atual com sucesso." }); 
       setModalMovimentacao(false); 
-      setMovForm({ tipo: "saida", categoria: "Gerais", valor: 0, descricao: "" }); 
+      setMovForm({ tipo: "sangria", categoria: "Gerais", valor: 0, descricao: "" }); 
       queryClient.invalidateQueries({ queryKey: ["movimentacoes_caixa"] }); 
     },
     onError: (err: any) => toast.error("Erro no Lançamento", { description: err.message })
@@ -922,10 +961,8 @@ export default function FinanceiroPage() {
                 <Select value={movForm.tipo} onValueChange={(v) => setMovForm({...movForm, tipo: v})}>
                   <SelectTrigger className="h-12 rounded-xl bg-card font-bold shadow-sm border-border/60"><SelectValue /></SelectTrigger>
                   <SelectContent className="rounded-xl border-border/50">
-                    <SelectItem value="saida" className="text-red-500 font-bold">Saída (Gasto)</SelectItem>
-                    <SelectItem value="sangria" className="text-red-500 font-bold">Sangria (Retirada)</SelectItem>
-                    <SelectItem value="entrada" className="text-emerald-500 font-bold">Entrada (Avulsa)</SelectItem>
-                    <SelectItem value="reforco" className="text-emerald-500 font-bold">Reforço de Caixa</SelectItem>
+                    <SelectItem value="sangria" className="text-red-500 font-bold">Sangria/Saída</SelectItem>                   
+                    <SelectItem value="entrada" className="text-emerald-500 font-bold">Entrada (Avulsa)</SelectItem>                   
                   </SelectContent>
                 </Select>
               </div>
