@@ -309,6 +309,31 @@ export default function CrediarioPage() {
     window.open(`https://wa.me/55${numeroLimpo}?text=${encodeURIComponent(mensagem)}`, '_blank');
   };
 
+  // --- NOVA FUNÇÃO DE COBRANÇA DE ATRASO ---
+  const enviarWhatsAppCobrancaAtraso = (parcela: any, cliente: any) => {
+    if (!cliente?.telefone) {
+      toast.error("O cliente não possui telefone cadastrado.");
+      return;
+    }
+    
+    const numeroLimpo = cliente.telefone.replace(/\D/g, '');
+    const dataFormatada = new Date(parcela.data_vencimento + 'T12:00:00').toLocaleDateString('pt-BR');
+    const valorFormatado = Number(parcela.valor_parcela).toFixed(2);
+    
+    // Cálculo de dias de atraso
+    const dataVenc = new Date(parcela.data_vencimento + 'T12:00:00');
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    dataVenc.setHours(0, 0, 0, 0);
+    
+    const diffTime = Math.abs(hoje.getTime() - dataVenc.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    const mensagem = `Olá ${cliente.nome}, tudo bem? Passando para lembrar que a parcela ${parcela.numero_parcela} do seu crediário, no valor de R$ ${valorFormatado}, está vencida há ${diffDays} dia(s) (${dataFormatada}). Qualquer dúvida, estamos à disposição!`;
+    
+    window.open(`https://wa.me/55${numeroLimpo}?text=${encodeURIComponent(mensagem)}`, '_blank');
+  };
+
   return (
     <div className="flex flex-col gap-6 pb-8 animate-in fade-in duration-500">
       
@@ -645,13 +670,25 @@ export default function CrediarioPage() {
                                           </div>
                                           
                                           {!isPago ? (
-                                            <Button 
-                                              size="sm" 
-                                              className="h-8 text-xs font-bold bg-primary hover:bg-primary/90 px-4 shadow-sm"
-                                              onClick={() => handlePagarClick(p)}
-                                            >
-                                              Receber
-                                            </Button>
+                                            <div className="flex items-center gap-2">
+                                              {isAtrasada && (
+                                                <Button 
+                                                  size="sm" 
+                                                  className="h-8 text-xs font-bold bg-[#25D366] hover:bg-[#20bd5a] text-white px-3 shadow-sm"
+                                                  onClick={() => enviarWhatsAppCobrancaAtraso(p, cred.cliente)}
+                                                >
+                                                  <MessageCircle className="h-4 w-4 mr-1" />
+                                                  Cobrar
+                                                </Button>
+                                              )}
+                                              <Button 
+                                                size="sm" 
+                                                className="h-8 text-xs font-bold bg-primary hover:bg-primary/90 px-4 shadow-sm"
+                                                onClick={() => handlePagarClick(p)}
+                                              >
+                                                Receber
+                                              </Button>
+                                            </div>
                                           ) : (
                                             <div className="flex flex-col text-right">
                                               <span className="text-[10px] text-emerald-600 uppercase font-bold">Pago em ({p.forma_pagamento?.toUpperCase() || 'N/A'})</span>
